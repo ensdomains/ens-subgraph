@@ -512,7 +512,7 @@
         "type": "bytes32"
       },
       {
-        "indexed": false,
+        "indexed": true,
         "internalType": "string",
         "name": "indexedKey",
         "type": "string"

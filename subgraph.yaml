@@ -100,7 +100,7 @@ dataSources:
           handler: handleNameChanged
         - event: 'PubkeyChanged(indexed bytes32,bytes32,bytes32)'
           handler: handlePubkeyChanged
-        - event: 'TextChanged(indexed bytes32,string,string)'
+        - event: 'TextChanged(indexed bytes32,indexed string,string)'
           handler: handleTextChanged
   - kind: ethereum/contract
     name: AuctionRegistrar
