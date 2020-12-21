@@ -46,6 +46,7 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
   let domain = getDomain(subnode);
   if(domain == null) {
     domain = new Domain(subnode)
+    domain.createdAt = event.block.timestamp
   }
 
   if(domain.name == null) {
