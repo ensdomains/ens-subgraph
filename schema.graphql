@@ -63,6 +63,7 @@ type Registration @entity {
   domain: Domain
   registrationDate: BigInt!
   expiryDate: BigInt!
+  cost: BigInt
   registrant: Account!
   labelName: String
   events: [RegistrationEvent!]! @derivedFrom(field: "registration")
