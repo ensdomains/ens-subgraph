@@ -10,7 +10,7 @@ type Domain @entity {
   resolver: Resolver
   ttl: BigInt
   isMigrated: Boolean!
-  createdAt: BigInt
+  createdAt: BigInt!
   events: [DomainEvent!]! @derivedFrom(field: "domain")
 }
 
