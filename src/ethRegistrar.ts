@@ -64,6 +64,8 @@ export function handleNameRegisteredByController(event: ControllerNameRegistered
   let registration = Registration.load(event.params.label.toHex());
   if(registration == null) return
   registration.labelName = event.params.name
+  registration.cost = event.params.cost
+  registration.save()
 }
 
 export function handleNameRenewedByController(event: ControllerNameRenewedEvent): void {
@@ -77,6 +79,8 @@ export function handleNameRenewedByController(event: ControllerNameRenewedEvent)
   let registration = Registration.load(event.params.label.toHex());
   if(registration == null) return
   registration.labelName = event.params.name
+  registration.cost = event.params.cost
+  registration.save()
 }
 
 export function handleNameRenewed(event: NameRenewedEvent): void {

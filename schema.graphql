@@ -31,6 +31,7 @@ type Transfer implements DomainEvent @entity {
 
 type NewOwner implements DomainEvent @entity {
   id: ID!
+  parentDomain: Domain!
   domain: Domain!
   blockNumber: Int!
   transactionID: Bytes!
@@ -64,6 +65,7 @@ type Registration @entity {
   domain: Domain
   registrationDate: BigInt!
   expiryDate: BigInt!
+  cost: BigInt
   registrant: Account!
   labelName: String
   events: [RegistrationEvent!]! @derivedFrom(field: "registration")

@@ -76,6 +76,7 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
   let domainEvent = new NewOwner(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
   domainEvent.transactionID = event.transaction.hash
+  domainEvent.parentDomain = event.params.node.toHexString()
   domainEvent.domain = domain.id
   domainEvent.owner = account.id
   domainEvent.save()
