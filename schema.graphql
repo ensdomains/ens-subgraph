@@ -71,6 +71,12 @@ type Registration @entity {
   events: [RegistrationEvent!]! @derivedFrom(field: "registration")
 }
 
+type ReverseRegistration @entity {
+  id: ID! # TX Hash
+  registrant: Account!
+  name: String!
+}
+
 interface RegistrationEvent {
   id: ID!
   registration: Registration!
