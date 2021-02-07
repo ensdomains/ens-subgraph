@@ -75,6 +75,7 @@ type ReverseRegistration @entity {
   id: ID! # TX Hash
   registrant: Account!
   name: String!
+  timestamp: BigInt!
 }
 
 interface RegistrationEvent {

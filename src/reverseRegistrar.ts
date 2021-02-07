@@ -7,5 +7,6 @@ export function handleSetName(call: SetNameCall): void {
     account.save()
     registration.registrant = account.id
     registration.name = call.inputs.name
+    registration.timestamp = call.block.timestamp
     registration.save()
 }
