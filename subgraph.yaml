@@ -149,3 +149,26 @@ dataSources:
           handler: handleNameRegisteredByController
         - event: 'NameRenewed(string,indexed bytes32,uint256,uint256)'
           handler: handleNameRenewedByController
+  - kind: ethereum/contract
+    name: NameWrapper
+    network: mainnet
+    source:
+      address: '0x1E601336F8717bD3F175E1C1f730384Bc3BcE9Ea'
+      abi: NameWrapper
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.3
+      language: wasm/assemblyscript
+      file: ./src/nameWrapper.ts
+      entities:
+        - NameWrapper
+      abis:
+        - name: NameWrapper
+          file: ./abis/NameWrapper.json
+      eventHandlers:
+        - event: 'NameWrapped(indexed bytes32,bytes,address,uint96)'
+          handler: handleNameWrapped
+        - event: 'NameUnwrapped(indexed bytes32,address)'
+          handler: handleNameUnwrapped
+        - event: 'FusesBurned(indexed bytes32,uint96)'
+          handler: handleFusesBurned
