@@ -66,6 +66,14 @@ Here we have example queries, so that you don't have to type them in yourself ea
       }
     }
   }
+  registrations(where: { labelName_not: null }, orderBy: expiryDate, orderDirection: asc, first: 10, skip: 0) {
+    expiryDate
+    labelName
+    domain{
+      name
+      labelName
+    }
+  }
 }
 
 ```
