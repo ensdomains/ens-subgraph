@@ -56,12 +56,7 @@ export function handleAddrChanged(event: AddrChangedEvent): void {
 export function handleMulticoinAddrChanged(event: AddressChangedEvent): void {
   let resolver = getOrCreateResolver(event.params.node, event.address)
 
-  // Handle cointypes that are outside the range we support
-  if(!event.params.coinType.isI32()) {
-    return;
-  }
-
-  let coinType = event.params.coinType.toI32()
+  let coinType = event.params.coinType
   if(resolver.coinTypes == null) {
     resolver.coinTypes = [coinType];
     resolver.save();
