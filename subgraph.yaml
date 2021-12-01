@@ -10,7 +10,7 @@ dataSources:
     name: ENSRegistry
     network: mainnet
     source:
-      address: '0x3Cc52303F29779DF90C9975521F1CB6860dcbEB0'
+      address: '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e'
       abi: EnsRegistry
     mapping:
       kind: ethereum/events
@@ -37,7 +37,7 @@ dataSources:
     name: ENSRegistryOld
     network: mainnet
     source:
-      address: '0x73f7c56570A1f6625Fdb5F6bb1b85ACdeF379aa5'
+      address: '0x314159265dd8dbb310642f98f50c066173c1259b'
       abi: EnsRegistry
     mapping:
       kind: ethereum/events
@@ -108,7 +108,7 @@ dataSources:
     name: BaseRegistrar
     network: mainnet
     source:
-      address: '0x2d194966350732d4fB1A3105b437f47e01C533D5'
+      address: '0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85'
       abi: BaseRegistrar
     mapping:
       kind: ethereum/events
@@ -134,7 +134,7 @@ dataSources:
     name: EthRegistrarController
     network: mainnet
     source:
-      address: '0x2cc230Bc67d67D43f6e45C92Ab0e884C0F4D941c'
+      address: '0x283Af0B28c62C092C9727F1Ee09c02CA627EB7F5'
       abi: EthRegistrarController
     mapping:
       kind: ethereum/events
