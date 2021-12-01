@@ -25,7 +25,7 @@ import {
   TextChanged,
 } from './types/schema'
 
-import { Bytes, BigInt, Address, EthereumEvent } from "@graphprotocol/graph-ts";
+import { Bytes, BigInt, Address, ethereum } from "@graphprotocol/graph-ts";
 
 import { log } from '@graphprotocol/graph-ts'
 
@@ -177,7 +177,7 @@ function getOrCreateResolver(node: Bytes, address: Address): Resolver {
   return resolver as Resolver
 }
 
-function createEventID(event: EthereumEvent): string {
+function createEventID(event: ethereum.Event): string {
   return event.block.number.toString().concat('-').concat(event.logIndex.toString())
 }
 

@@ -54,29 +54,38 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
     domain.createdAt = event.block.timestamp
   }
 
-  if(domain.name == null) {
+  if(domain && domain.name == null) {
     // Get label and node names
     let label = ens.nameByHash(event.params.label.toHexString())
     if (label != null) {
       domain.labelName = label
     }
 
-    if(label == null) {
+    if(label === null) {
       label = '[' + event.params.label.toHexString().slice(2) + ']'
     }
     if(event.params.node.toHexString() == '0x0000000000000000000000000000000000000000000000000000000000000000') {
       domain.name = label
     } else {
       let parent = Domain.load(event.params.node.toHexString())
-      domain.name = label + '.' + parent.name
+      if(parent){
+        let name = parent.name
+        if (label) {
+          if (name) {
+            domain.name = label + '.'  + name
+          }
+        }
+      }
     }
   }
 
-  domain.owner = account.id
-  domain.parent = event.params.node.toHexString()
-  domain.labelhash = event.params.label
-  domain.isMigrated = isMigrated
-  domain.save()
+  if(domain){
+    domain.owner = account.id
+    domain.parent = event.params.node.toHexString()
+    domain.labelhash = event.params.label
+    domain.isMigrated = isMigrated
+    domain.save()
+  }
 
   let domainEvent = new NewOwner(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -96,8 +105,10 @@ export function handleTransfer(event: TransferEvent): void {
 
   // Update the domain owner
   let domain = getDomain(node)
-  domain.owner = account.id
-  domain.save()
+  if(domain){
+    domain.owner = account.id
+    domain.save()
+  }
 
   let domainEvent = new Transfer(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -113,19 +124,20 @@ export function handleNewResolver(event: NewResolverEvent): void {
 
   let node = event.params.node.toHexString()
   let domain = getDomain(node)
-  domain.resolver = id
+  if(domain){
+    domain.resolver = id
 
-  let resolver = Resolver.load(id)
-  if(resolver == null) {
-    resolver = new Resolver(id)
-    resolver.domain = event.params.node.toHexString()
-    resolver.address = event.params.resolver
-    resolver.save()
-  } else {
-    domain.resolvedAddress = resolver.addr
+    let resolver = Resolver.load(id)
+    if(resolver == null) {
+      resolver = new Resolver(id)
+      resolver.domain = event.params.node.toHexString()
+      resolver.address = event.params.resolver
+      resolver.save()
+    } else {
+      domain.resolvedAddress = resolver.addr
+    }
+    domain.save()
   }
-
-  domain.save()
 
   let domainEvent = new NewResolver(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -139,8 +151,10 @@ export function handleNewResolver(event: NewResolverEvent): void {
 export function handleNewTTL(event: NewTTLEvent): void {
   let node = event.params.node.toHexString()
   let domain = getDomain(node)
-  domain.ttl = event.params.ttl
-  domain.save()
+  if(domain){
+    domain.ttl = event.params.ttl
+    domain.save()
+  }
 
   let domainEvent = new NewTTL(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -166,14 +180,14 @@ export function handleNewOwnerOldRegistry(event: NewOwnerEvent): void {
 export function handleNewResolverOldRegistry(event: NewResolverEvent): void {
   let node = event.params.node.toHexString()
   let domain = getDomain(node, event.block.timestamp)
-  if(node == ROOT_NODE || !domain.isMigrated){
+  if(node == ROOT_NODE || domain == null || !domain.isMigrated){
     handleNewResolver(event)
   }
 }
 export function handleNewTTLOldRegistry(event: NewTTLEvent): void {
   let domain = getDomain(event.params.node.toHexString())
 
-  if(domain.isMigrated == false){
+  if(domain && domain.isMigrated == false){
     handleNewTTL(event)
   }
 }
@@ -181,7 +195,7 @@ export function handleNewTTLOldRegistry(event: NewTTLEvent): void {
 export function handleTransferOldRegistry(event: TransferEvent): void {
   let domain = getDomain(event.params.node.toHexString())
 
-  if(domain.isMigrated == false){
+  if(domain && domain.isMigrated == false){
     handleTransfer(event)
   }
 }
