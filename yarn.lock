@@ -35,10 +35,10 @@
     multicodec "^3.2.0"
     multihashes "^2.0.0"
 
-"@graphprotocol/graph-cli@^0.24.1":
-  version "0.24.1"
-  resolved "https://registry.yarnpkg.com/@graphprotocol/graph-cli/-/graph-cli-0.24.1.tgz#711641669321afffee10ff01231876b4be87ef51"
-  integrity sha512-SwAvaB3A+UhiuX7Tosc5XCr24rujCFrO8tW+DAg0W6Fjbyef2Yl1qt8UxPlhobU/oQW0U4k1CY7pjIf9OLDpdQ==
+"@graphprotocol/graph-cli@^0.23.2":
+  version "0.23.2"
+  resolved "https://registry.yarnpkg.com/@graphprotocol/graph-cli/-/graph-cli-0.23.2.tgz#cfb3787bd1b571b28fed05a748116579f01cda19"
+  integrity sha512-1JDyCwaAIeKsEPYPlsJ7IiAB5BhQ+v2fvmDIJTcLfRIYmTKsoETdjrw9qUGJtjICVXIGuL9DeNVhQgKgTMCQZQ==
   dependencies:
     assemblyscript "0.19.10"
     binary-install-raw "0.0.13"
@@ -64,10 +64,10 @@
     which "2.0.2"
     yaml "^1.5.1"
 
-"@graphprotocol/graph-ts@^0.24.1":
-  version "0.24.1"
-  resolved "https://registry.yarnpkg.com/@graphprotocol/graph-ts/-/graph-ts-0.24.1.tgz#50961b52b5383f9c5cf5e6e23fa039f24e729ddf"
-  integrity sha512-2vU4m5ZPQIqMlMce/z5vmOtGHRlRmcRhMfemS3NIwxCSxSBGVnX2zb7QBTzzdQKGwsAZdbz6V0okkOtvohELfQ==
+"@graphprotocol/graph-ts@^0.23.1":
+  version "0.23.1"
+  resolved "https://registry.yarnpkg.com/@graphprotocol/graph-ts/-/graph-ts-0.23.1.tgz#76e595d26ec5672f3778b1d3830e4640a57aec1b"
+  integrity sha512-pipofvN1LlwLOXrS7IWy8hSBFZzVyVHdLXDpQskl9nKqdbb3chelj4JoVEzCl7klvomDpP84ngLpW17fBh5vww==
   dependencies:
     assemblyscript "0.19.10"
 

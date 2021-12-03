@@ -1,7 +1,9 @@
 // Import types and APIs from graph-ts
 import {
   BigInt,
+  ByteArray,
   crypto,
+  log,
   ens
 } from '@graphprotocol/graph-ts'
 
@@ -42,12 +44,48 @@ function getDomain(node: string, timestamp: BigInt = BIG_INT_ZERO): Domain|null 
   return domain
 }
 
+function makeSubnode(event:NewOwnerEvent): string {
+  log.warning(
+    '*** makeSubnode1 {},{}, {}, {},1',
+    [
+      event.address.toHexString(),
+      event.block.number.toString(),       // "47596000"
+      event.block.hash.toHexString(),      // "0x..."
+      event.transaction.hash.toHexString() // "0x..."
+    ]
+  );
+  let nodeString = event.params.node.toHex()
+  log.warning(
+    '*** makeSubnode2 {},2',
+    [
+      nodeString
+    ]
+  );
+  let labelString = event.params.label.toHex()
+  log.warning(
+    '*** makeSubnode3 {},3',
+    [
+      labelString
+    ]
+  );
+
+  let myString = nodeString.concat(labelString)
+  log.warning(
+    '*** makeSubnode4 {}4,',
+    [
+      myString
+    ]
+  );
+
+  return crypto.keccak256(ByteArray.fromHexString(myString)).toHexString()
+}
+
 // Handler for NewOwner events
 function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
   let account = new Account(event.params.owner.toHexString())
   account.save()
 
-  let subnode = crypto.keccak256(concat(event.params.node, event.params.label)).toHexString()
+  let subnode = makeSubnode(event)
   let domain = getDomain(subnode, event.block.timestamp);
   if(domain == null) {
     domain = new Domain(subnode)
@@ -165,11 +203,20 @@ export function handleNewTTL(event: NewTTLEvent): void {
 }
 
 export function handleNewOwner(event: NewOwnerEvent): void {
+  log.warning(
+    '*** handleNewOwner: contract address:{} block number:{}, block hash: {}, transaction hash: {}',
+    [
+      event.address.toHexString(),
+      event.block.number.toString(),       // "47596000"
+      event.block.hash.toHexString(),      // "0x..."
+      event.transaction.hash.toHexString() // "0x..."
+    ]
+  );
   _handleNewOwner(event, true)
 }
 
 export function handleNewOwnerOldRegistry(event: NewOwnerEvent): void {
-  let subnode = crypto.keccak256(concat(event.params.node, event.params.label)).toHexString()
+  let subnode = makeSubnode(event)
   let domain = getDomain(subnode)
 
   if(domain == null || domain.isMigrated == false){

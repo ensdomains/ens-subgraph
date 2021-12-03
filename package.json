@@ -19,8 +19,8 @@
   },
   "devDependencies": {
     "@ensdomains/content-hash": "^2.5.3",
-    "@graphprotocol/graph-cli": "^0.24.1",
-    "@graphprotocol/graph-ts": "^0.24.1"
+    "@graphprotocol/graph-cli": "^0.23.2",
+    "@graphprotocol/graph-ts": "^0.23.1"
   },
   "dependencies": {}
 }
