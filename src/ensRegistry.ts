@@ -159,11 +159,9 @@ export function handleNewResolver(event: NewResolverEvent): void {
 // Handler for NewTTL events
 export function handleNewTTL(event: NewTTLEvent): void {
   let node = event.params.node.toHexString()
-  let domain = getDomain(node)
-  if(domain){
-    domain.ttl = event.params.ttl
-    domain.save()
-  }
+  let domain = getDomain(node)!
+  domain.ttl = event.params.ttl
+  domain.save()
 
   let domainEvent = new NewTTL(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -203,17 +201,15 @@ export function handleNewResolverOldRegistry(event: NewResolverEvent): void {
   }
 }
 export function handleNewTTLOldRegistry(event: NewTTLEvent): void {
-  let domain = getDomain(event.params.node.toHexString())
-
-  if(domain && domain.isMigrated == false){
+  let domain = getDomain(event.params.node.toHexString())!
+  if(domain.isMigrated == false){
     handleNewTTL(event)
   }
 }
 
 export function handleTransferOldRegistry(event: TransferEvent): void {
-  let domain = getDomain(event.params.node.toHexString())
-
-  if(domain && domain.isMigrated == false){
+  let domain = getDomain(event.params.node.toHexString())!
+  if(domain.isMigrated == false){
     handleTransfer(event)
   }
 }
