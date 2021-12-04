@@ -106,13 +106,8 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
       domain.name = label
     } else {
       let parent = Domain.load(event.params.node.toHexString())
-      if(parent){
-        let name = parent.name
-        if (label) {
-          if (name) {
-            domain.name = label + '.'  + name
-          }
-        }
+      if(parent && parent.name && label) {
+        domain.name = label + '.' + parent.name;
       }
     }
   }
