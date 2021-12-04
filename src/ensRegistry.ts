@@ -54,30 +54,7 @@ function makeSubnode(event:NewOwnerEvent): string {
       event.transaction.hash.toHexString() // "0x..."
     ]
   );
-  let nodeString = event.params.node.toHex()
-  log.warning(
-    '*** makeSubnode2 {},2',
-    [
-      nodeString
-    ]
-  );
-  let labelString = event.params.label.toHex()
-  log.warning(
-    '*** makeSubnode3 {},3',
-    [
-      labelString
-    ]
-  );
-
-  let myString = nodeString.concat(labelString)
-  log.warning(
-    '*** makeSubnode4 {}4,',
-    [
-      myString
-    ]
-  );
-
-  return crypto.keccak256(ByteArray.fromHexString(myString)).toHexString()
+  return crypto.keccak256(concat(event.params.node, event.params.label)).toHexString()
 }
 
 // Handler for NewOwner events
