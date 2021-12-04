@@ -69,7 +69,7 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
     domain.createdAt = event.block.timestamp
   }
 
-  if(domain && domain.name == null) {
+  if(domain.name == null) {
     // Get label and node names
     let label = ens.nameByHash(event.params.label.toHexString())
     if (label != null) {
@@ -83,19 +83,20 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
       domain.name = label
     } else {
       let parent = Domain.load(event.params.node.toHexString())
-      if(parent && parent.name && label) {
-        domain.name = label + '.' + parent.name;
+      if(parent){
+        let name = parent.name
+        if (label && name ) {
+          domain.name = label + '.'  + name
+        }
       }
     }
   }
 
-  if(domain){
-    domain.owner = account.id
-    domain.parent = event.params.node.toHexString()
-    domain.labelhash = event.params.label
-    domain.isMigrated = isMigrated
-    domain.save()
-  }
+  domain.owner = account.id
+  domain.parent = event.params.node.toHexString()
+  domain.labelhash = event.params.label
+  domain.isMigrated = isMigrated
+  domain.save()
 
   let domainEvent = new NewOwner(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -114,11 +115,9 @@ export function handleTransfer(event: TransferEvent): void {
   account.save()
 
   // Update the domain owner
-  let domain = getDomain(node)
-  if(domain){
-    domain.owner = account.id
-    domain.save()
-  }
+  let domain = getDomain(node)!
+  domain.owner = account.id
+  domain.save()
 
   let domainEvent = new Transfer(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
