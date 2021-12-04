@@ -1,9 +1,7 @@
 // Import types and APIs from graph-ts
 import {
   BigInt,
-  ByteArray,
   crypto,
-  log,
   ens
 } from '@graphprotocol/graph-ts'
 
@@ -45,15 +43,6 @@ function getDomain(node: string, timestamp: BigInt = BIG_INT_ZERO): Domain|null 
 }
 
 function makeSubnode(event:NewOwnerEvent): string {
-  log.warning(
-    '*** makeSubnode1 {},{}, {}, {},1',
-    [
-      event.address.toHexString(),
-      event.block.number.toString(),       // "47596000"
-      event.block.hash.toHexString(),      // "0x..."
-      event.transaction.hash.toHexString() // "0x..."
-    ]
-  );
   return crypto.keccak256(concat(event.params.node, event.params.label)).toHexString()
 }
 
@@ -172,15 +161,6 @@ export function handleNewTTL(event: NewTTLEvent): void {
 }
 
 export function handleNewOwner(event: NewOwnerEvent): void {
-  log.warning(
-    '*** handleNewOwner: contract address:{} block number:{}, block hash: {}, transaction hash: {}',
-    [
-      event.address.toHexString(),
-      event.block.number.toString(),       // "47596000"
-      event.block.hash.toHexString(),      // "0x..."
-      event.transaction.hash.toHexString() // "0x..."
-    ]
-  );
   _handleNewOwner(event, true)
 }
 
