@@ -25,9 +25,7 @@ import {
   TextChanged,
 } from './types/schema'
 
-import { Bytes, BigInt, Address, ethereum } from "@graphprotocol/graph-ts";
-
-import { log } from '@graphprotocol/graph-ts'
+import { Bytes, Address, ethereum } from "@graphprotocol/graph-ts";
 
 export function handleAddrChanged(event: AddrChangedEvent): void {
   let account = new Account(event.params.a.toHexString())
