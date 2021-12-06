@@ -36,7 +36,7 @@ function createDomain(node: string, timestamp: BigInt): Domain {
 
 function getDomain(node: string, timestamp: BigInt = BIG_INT_ZERO): Domain | null {
   let domain = Domain.load(node)
-  if(domain == null && node == ROOT_NODE) {
+  if(domain === null && node == ROOT_NODE) {
     return createDomain(node, timestamp)
   }else{
     return domain
@@ -54,7 +54,7 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
 
   let subnode = makeSubnode(event)
   let domain = getDomain(subnode, event.block.timestamp);
-  if(domain == null) {
+  if(domain === null) {
     domain = new Domain(subnode)
     domain.createdAt = event.block.timestamp
   }
