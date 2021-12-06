@@ -165,9 +165,9 @@ export function handleNewOwner(event: NewOwnerEvent): void {
 
 export function handleNewOwnerOldRegistry(event: NewOwnerEvent): void {
   let subnode = makeSubnode(event)
-  let domain = getDomain(subnode)!
+  let domain = getDomain(subnode)
 
-  if(domain.isMigrated == false){
+  if(domain == null || domain.isMigrated == false){
     _handleNewOwner(event, false)
   }
 }
