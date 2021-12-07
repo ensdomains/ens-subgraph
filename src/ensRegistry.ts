@@ -1,9 +1,7 @@
 // Import types and APIs from graph-ts
 import {
   BigInt,
-  ByteArray,
   crypto,
-  log,
   ens
 } from '@graphprotocol/graph-ts'
 
@@ -36,24 +34,16 @@ function createDomain(node: string, timestamp: BigInt): Domain {
   return domain
 }
 
-function getDomain(node: string, timestamp: BigInt = BIG_INT_ZERO): Domain|null {
+function getDomain(node: string, timestamp: BigInt = BIG_INT_ZERO): Domain | null {
   let domain = Domain.load(node)
-  if(domain == null && node == ROOT_NODE) {
+  if(domain === null && node == ROOT_NODE) {
     return createDomain(node, timestamp)
+  }else{
+    return domain
   }
-  return domain
 }
 
 function makeSubnode(event:NewOwnerEvent): string {
-  log.warning(
-    '*** makeSubnode1 {},{}, {}, {},1',
-    [
-      event.address.toHexString(),
-      event.block.number.toString(),       // "47596000"
-      event.block.hash.toHexString(),      // "0x..."
-      event.transaction.hash.toHexString() // "0x..."
-    ]
-  );
   return crypto.keccak256(concat(event.params.node, event.params.label)).toHexString()
 }
 
@@ -64,7 +54,7 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
 
   let subnode = makeSubnode(event)
   let domain = getDomain(subnode, event.block.timestamp);
-  if(domain == null) {
+  if(domain === null) {
     domain = new Domain(subnode)
     domain.createdAt = event.block.timestamp
   }
@@ -132,21 +122,19 @@ export function handleNewResolver(event: NewResolverEvent): void {
   let id = event.params.resolver.toHexString().concat('-').concat(event.params.node.toHexString())
 
   let node = event.params.node.toHexString()
-  let domain = getDomain(node)
-  if(domain){
-    domain.resolver = id
+  let domain = getDomain(node)!
+  domain.resolver = id
 
-    let resolver = Resolver.load(id)
-    if(resolver == null) {
-      resolver = new Resolver(id)
-      resolver.domain = event.params.node.toHexString()
-      resolver.address = event.params.resolver
-      resolver.save()
-    } else {
-      domain.resolvedAddress = resolver.addr
-    }
-    domain.save()
+  let resolver = Resolver.load(id)
+  if(resolver == null) {
+    resolver = new Resolver(id)
+    resolver.domain = event.params.node.toHexString()
+    resolver.address = event.params.resolver
+    resolver.save()
+  } else {
+    domain.resolvedAddress = resolver.addr
   }
+  domain.save()
 
   let domainEvent = new NewResolver(createEventID(event))
   domainEvent.blockNumber = event.block.number.toI32()
@@ -172,15 +160,6 @@ export function handleNewTTL(event: NewTTLEvent): void {
 }
 
 export function handleNewOwner(event: NewOwnerEvent): void {
-  log.warning(
-    '*** handleNewOwner: contract address:{} block number:{}, block hash: {}, transaction hash: {}',
-    [
-      event.address.toHexString(),
-      event.block.number.toString(),       // "47596000"
-      event.block.hash.toHexString(),      // "0x..."
-      event.transaction.hash.toHexString() // "0x..."
-    ]
-  );
   _handleNewOwner(event, true)
 }
 
@@ -195,8 +174,8 @@ export function handleNewOwnerOldRegistry(event: NewOwnerEvent): void {
 
 export function handleNewResolverOldRegistry(event: NewResolverEvent): void {
   let node = event.params.node.toHexString()
-  let domain = getDomain(node, event.block.timestamp)
-  if(node == ROOT_NODE || domain == null || !domain.isMigrated){
+  let domain = getDomain(node, event.block.timestamp)!
+  if(node == ROOT_NODE || !domain.isMigrated){
     handleNewResolver(event)
   }
 }
