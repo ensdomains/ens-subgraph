@@ -59,13 +59,11 @@ export function handleMulticoinAddrChanged(event: AddressChangedEvent): void {
     resolver.coinTypes = [coinType];
     resolver.save();
   } else {
-    let coinTypes = resolver.coinTypes
-    if(coinTypes){
-      if(coinTypes.includes(coinType) != true){
-        coinTypes.push(coinType)
-        resolver.coinTypes = coinTypes
-        resolver.save()
-      }
+    let coinTypes = resolver.coinTypes!
+    if(coinTypes.includes(coinType)){
+      coinTypes.push(coinType)
+      resolver.coinTypes = coinTypes
+      resolver.save()
     }
   }
 
@@ -117,7 +115,7 @@ export function handleTextChanged(event: TextChangedEvent): void {
   } else {
     let texts = resolver.texts
     if(texts){
-      if(texts.includes(key) !== true){
+      if(texts.includes(key)){
         texts.push(key)
         resolver.texts = texts
         resolver.save()
