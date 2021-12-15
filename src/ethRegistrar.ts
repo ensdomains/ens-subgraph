@@ -85,7 +85,7 @@ export function handleNameRenewedByController(event: ControllerNameRenewedEvent)
 
 export function handleNameRenewed(event: NameRenewedEvent): void {
   let label = uint256ToByteArray(event.params.id)
-  let registration = new Registration(label.toHex())
+  let registration = Registration.load(label.toHex())!
   registration.expiryDate = event.params.expires
   registration.save()
 
