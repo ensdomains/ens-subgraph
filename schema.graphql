@@ -170,7 +170,7 @@ type TextChanged implements ResolverEvent @entity {
   blockNumber: Int!
   transactionID: Bytes!
   key: String!
-  value: String!
+  value: String
 }
 
 type ContenthashChanged implements ResolverEvent @entity {

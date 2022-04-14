@@ -170,7 +170,7 @@ export function handleTextChanged(event: TextChangedEvent): void {
     const decodedTuple = decodedAbi.toTuple();
     resolverEvent.value = decodedTuple[2].toString();
   } else {
-    resolverEvent.value = "";
+    resolverEvent.value = null;
   }
   resolverEvent.save()
 }
