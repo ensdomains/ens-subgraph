@@ -1,4 +1,5 @@
 import { Address, ByteArray, Bytes, ethereum, Value } from "@graphprotocol/graph-ts";
+import { Resolver as ResolverContract } from "./types/Resolver/Resolver";
 import {
   ABIChanged as ABIChangedEvent,
   AddrChanged as AddrChangedEvent,
@@ -98,6 +99,9 @@ export function handlePubkeyChanged(event: PubkeyChangedEvent): void {
 
 export function handleTextChanged(event: TextChangedEvent): void {
   let resolver = getOrCreateResolver(event.params.node, event.address)
+  let contract = ResolverContract.bind(event.address)
+  let value = contract.try_text(event.params.node, event.params.key)
+
   let key = event.params.key;
   if(resolver.texts == null) {
     resolver.texts = [key];
@@ -116,62 +120,7 @@ export function handleTextChanged(event: TextChangedEvent): void {
   resolverEvent.blockNumber = event.block.number.toI32()
   resolverEvent.transactionID = event.transaction.hash
   resolverEvent.key = event.params.key
-  // first, we need to find the total number of setText calls in the logs for the transaction
-  // then we get the matched index of the setText calls for this event
-  const textChangedEvents: ethereum.Log[] = [];
-  let textChangedEventIndex = 0;
-  for (let i = 0; i < event.receipt!.logs.length; i++) {
-    const log = event.receipt!.logs[i];
-    if (log.logType == event.logType) {
-      textChangedEvents.push(log);
-    }
-    if (log.logIndex == event.logIndex) {
-      textChangedEventIndex = textChangedEvents.length - 1;
-    }
-  }
-  // we need to find where all the setText calls are, so we can use the index we previously got
-  // to find the correct setText input.
-  const inputBytes = event.transaction.input;
-  // convert bytes to hex string so we can make a string comparison
-  const inputBytesAsHex = inputBytes.toHexString();
-  const hashIndexes = [];
-  for (let i = 0; i < inputBytesAsHex.length; i++) {
-    if (inputBytesAsHex.slice(i, i + 8) == "10f13a8c") {
-      hashIndexes.push(i / 2 - 1);
-    }
-  }
-  // get the index of the function signature we want
-  const wantedIndex = hashIndexes[textChangedEventIndex];
-  // get the total length of the abi, so we can slice the right amount of bytes
-  const abiLength =
-    (wantedIndex === 0
-      ? event.transaction.input.byteLength
-      : parseInt(
-          inputBytes.slice(wantedIndex - 32, wantedIndex).toString(),
-          16
-        )) as i32;
-  // strip the function signature by adding 4 bytes to the index
-  const position = wantedIndex as i32 + 4;
-  // make a slice of the bytes we want, and remove 4 bytes from the end 
-  // to accomodate the function signature removal.
-  const functionInput = inputBytes.subarray(position, position + abiLength - 4);
-  // ethABI decode doesn't allow non-tuples to be decoded, 
-  // so we need to make the abi a tuple manually
-  const tuplePrefix = ByteArray.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000020")
-  const functionInputAsTuple = new Uint8Array(tuplePrefix.length + functionInput.length);
-  functionInputAsTuple.set(tuplePrefix, 0);
-  functionInputAsTuple.set(functionInput, tuplePrefix.length);
-  const tupleInputBytes = Bytes.fromUint8Array(functionInputAsTuple);
-  const decodedAbi = ethereum.decode(
-    "(bytes32,string,string)",
-    tupleInputBytes
-  );
-  if (decodedAbi != null) {
-    const decodedTuple = decodedAbi.toTuple();
-    resolverEvent.value = decodedTuple[2].toString();
-  } else {
-    resolverEvent.value = null;
-  }
+  resolverEvent.value = value.value
   resolverEvent.save()
 }
 
