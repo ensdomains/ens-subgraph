@@ -251,6 +251,14 @@ assemblyscript@0.19.10:
     binaryen "101.0.0-nightly.20210723"
     long "^4.0.0"
 
+assemblyscript@0.20.19:
+  version "0.20.19"
+  resolved "https://registry.yarnpkg.com/assemblyscript/-/assemblyscript-0.20.19.tgz#7c29f506a31d526f7d7e3b22908cc8774b378681"
+  integrity sha512-IJN2CaAwCdRgTSZz3GiuYyXtXIjETBrlzky9ww9jFlEgH8i0pNFt6MAS3viogkofem+rcY6Fhr/clk+b6LWLBw==
+  dependencies:
+    binaryen "109.0.0-nightly.20220813"
+    long "^5.2.0"
+
 assert-plus@1.0.0, assert-plus@^1.0.0:
   version "1.0.0"
   resolved "https://registry.yarnpkg.com/assert-plus/-/assert-plus-1.0.0.tgz#f12e0f3c5d77b0b1cdd9146942e4e96c1e4dd525"
@@ -342,6 +350,11 @@ binaryen@101.0.0-nightly.20210723:
   version "101.0.0-nightly.20210723"
   resolved "https://registry.yarnpkg.com/binaryen/-/binaryen-101.0.0-nightly.20210723.tgz#b6bb7f3501341727681a03866c0856500eec3740"
   integrity sha512-eioJNqhHlkguVSbblHOtLqlhtC882SOEPKmNFZaDuz1hzQjolxZ+eu3/kaS10n3sGPONsIZsO7R9fR00UyhEUA==
+
+binaryen@109.0.0-nightly.20220813:
+  version "109.0.0-nightly.20220813"
+  resolved "https://registry.yarnpkg.com/binaryen/-/binaryen-109.0.0-nightly.20220813.tgz#6928acf8820fc1270d41dbb157c0c2337a067d20"
+  integrity sha512-u85Ti3LiGRrV0HqdNDRknalkx7QiCSL0jNsEsT522nnZacWxUaSJEILphxc2OnzmHVtdiWBE3c4lEzlU3ZEyDw==
 
 bindings@^1.5.0:
   version "1.5.0"
@@ -2004,6 +2017,11 @@ long@^4.0.0:
   version "4.0.0"
   resolved "https://registry.yarnpkg.com/long/-/long-4.0.0.tgz#9a7b71cfb7d361a194ea555241c92f7468d5bf28"
   integrity sha512-XsP+KhQif4bjX1kbuSiySJFNAehNxgLb6hPRGJ9QsUr8ajHkuXGdrHmFUTUUXhDwVX2R5bY4JNZEwbUiMhV+MA==
+
+long@^5.2.0:
+  version "5.2.0"
+  resolved "https://registry.yarnpkg.com/long/-/long-5.2.0.tgz#2696dadf4b4da2ce3f6f6b89186085d94d52fd61"
+  integrity sha512-9RTUNjK60eJbx3uz+TEGF7fUr29ZDxR5QzXcyDpeSfeH28S9ycINflOgOlppit5U+4kNTe83KQnMEerw7GmE8w==
 
 looper@^3.0.0:
   version "3.0.0"

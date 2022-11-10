@@ -120,12 +120,29 @@ type NameRegistered implements RegistrationEvent @entity {
   expiryDate: BigInt!
 }
 
+type NameRegisteredWithCost implements RegistrationEvent @entity {
+  id: ID!
+  registration: Registration!
+  blockNumber: Int!
+  transactionID: Bytes!
+  baseCost: BigInt!
+  premium: BigInt
+}
+
 type NameRenewed implements RegistrationEvent @entity {
   id: ID!
   registration: Registration!
   blockNumber: Int!
   transactionID: Bytes!
   expiryDate: BigInt!
+}
+
+type NameRenewedWithCost implements RegistrationEvent @entity {
+  id: ID!
+  registration: Registration!
+  blockNumber: Int!
+  transactionID: Bytes!
+  cost: BigInt!
 }
 
 type NameTransferred implements RegistrationEvent @entity {

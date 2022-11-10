@@ -5,6 +5,7 @@ import {
   Bytes,
   crypto,
   ens,
+  ethereum,
   log
 } from '@graphprotocol/graph-ts'
 
@@ -18,7 +19,7 @@ import {
 } from './types/BaseRegistrar/BaseRegistrar'
 
 import {
-  NameRegistered as ControllerNameRegisteredEventOld,
+  NameRegistered as ControllerNameRegisteredEventOld
 } from './types/EthRegistrarControllerOld/EthRegistrarControllerOld'
 
 import {
@@ -27,7 +28,7 @@ import {
 } from './types/EthRegistrarController/EthRegistrarController'
 
 // Import entity types generated from the GraphQL schema
-import { Account, Domain, NameRegistered, NameRenewed, NameTransferred, Registration } from './types/schema'
+import { Account, Domain, NameRegistered, NameRegisteredWithCost, NameRenewed, NameRenewedWithCost, NameTransferred, Registration } from './types/schema'
 
 var rootNode:ByteArray = byteArrayFromHex("93cdeb708b7545dc668eb9280176169d1c33cfd8ed6f04690a0bcc88a93fc4ae")
 
@@ -62,14 +63,40 @@ export function handleNameRegistered(event: NameRegisteredEvent): void {
 
 export function handleNameRegisteredByControllerOld(event: ControllerNameRegisteredEventOld): void {
   setNamePreimage(event.params.name, event.params.label, event.params.cost);
+  makeNameRegisteredWithCostEvent(event);
 }
 
 export function handleNameRegisteredByController(event: ControllerNameRegisteredEvent): void {
-  setNamePreimage(event.params.name, event.params.label, event.params.baseCost.plus(event.params.premium))
+  setNamePreimage(event.params.name, event.params.label, event.params.baseCost.plus(event.params.premium));
+  makeNameRegisteredWithCostEvent(event);
 }
 
 export function handleNameRenewedByController(event: ControllerNameRenewedEvent): void {
   setNamePreimage(event.params.name, event.params.label, event.params.cost);
+
+  let renewalEvent = new NameRenewedWithCost(createEventID(event))
+  renewalEvent.registration = event.params.label.toHex()
+  renewalEvent.blockNumber = event.block.number.toI32()
+  renewalEvent.transactionID = event.transaction.hash
+  renewalEvent.cost = event.params.cost
+  renewalEvent.save()
+}
+
+function makeNameRegisteredWithCostEvent<E extends ethereum.Event>(event: E): void {
+  let registrationEvent = new NameRegisteredWithCost(createEventID(event))
+  registrationEvent.blockNumber = event.block.number.toI32()
+  registrationEvent.transactionID = event.transaction.hash
+  if (event instanceof ControllerNameRegisteredEvent) {
+    registrationEvent.premium = event.params.premium
+    registrationEvent.baseCost = event.params.baseCost
+    registrationEvent.registration = event.params.owner.toHex()
+  } else {
+    let oldEvent = changetype<ControllerNameRegisteredEventOld>(event)
+    registrationEvent.premium = BigInt.fromI32(0)
+    registrationEvent.baseCost = oldEvent.params.cost
+    registrationEvent.registration = oldEvent.params.owner.toHex()
+  }
+  registrationEvent.save()
 }
 
 function setNamePreimage(name: string, label: Bytes, cost: BigInt): void {
