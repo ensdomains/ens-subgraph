@@ -522,6 +522,12 @@
         "internalType": "string",
         "name": "key",
         "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "value",
+        "type": "string"
       }
     ],
     "name": "TextChanged",

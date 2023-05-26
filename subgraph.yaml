@@ -104,7 +104,7 @@ dataSources:
           handler: handleNameChanged
         - event: "PubkeyChanged(indexed bytes32,bytes32,bytes32)"
           handler: handlePubkeyChanged
-        - event: "TextChanged(indexed bytes32,indexed string,string)"
+        - event: "TextChanged(indexed bytes32,indexed string,string,string)"
           handler: handleTextChanged
         - event: "TextChanged(indexed bytes32,indexed string,string,string)"
           handler: handleTextChangedWithValue

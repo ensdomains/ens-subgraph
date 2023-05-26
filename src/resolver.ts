@@ -132,6 +132,7 @@ export function handleTextChanged(event: TextChangedEvent): void {
   resolverEvent.blockNumber = event.block.number.toI32();
   resolverEvent.transactionID = event.transaction.hash;
   resolverEvent.key = event.params.key;
+  resolverEvent.value = event.params.value;
   resolverEvent.save();
 }
 
