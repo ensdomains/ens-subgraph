@@ -1,7 +1,13 @@
 // Import types and APIs from graph-ts
-import { BigInt, crypto, ens } from "@graphprotocol/graph-ts";
+import { BigInt, crypto, ens, log, store } from "@graphprotocol/graph-ts";
 
-import { concat, createEventID, EMPTY_ADDRESS, ROOT_NODE } from "./utils";
+import {
+  concat,
+  createEventID,
+  EMPTY_ADDRESS,
+  ETH_NODE,
+  ROOT_NODE,
+} from "./utils";
 
 // Import event types from the registry contract ABI
 import {
@@ -121,6 +127,20 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
         domain.name = label + "." + name;
       }
     }
+  }
+
+  // this is effectively an unwrap event UNLESS it's a namewrapper upgrade, but the namewrapper events should handle that situation
+  log.warning("domain: {}, wrappedDomain: {}", [
+    domain.id,
+    domain.wrappedDomain._id,
+  ]);
+  if (domain.wrappedDomain._id) {
+    domain.wrappedOwner = null;
+    if (domain.expiryDate && domain.parent !== ETH_NODE) {
+      domain.expiryDate = null;
+    }
+
+    store.remove("WrappedDomain", subnode);
   }
 
   domain.owner = event.params.owner.toHexString();
