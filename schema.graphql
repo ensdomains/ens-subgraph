@@ -449,3 +449,30 @@ type VersionChanged implements ResolverEvent @entity {
   "The new version number of the resolver"
   version: BigInt!
 }
+
+type IPAddress {
+  id: ID!
+  address: String!
+  domain: Domain
+}
+
+type Domain @entity {
+  # ...
+  "A brief description of the domain"
+  description: String
+  # ...
+}
+
+type PaymentReceivedEvent @entity {
+  id: ID!
+  domain: Domain!
+  amount: Float!
+  timestamp: BigInt!
+}
+
+type Account @entity {
+  # ...
+  "The domains owned by the account"
+  ownedDomains: [Domain!]! @derivedFrom(field: "owner")
+  # ...
+}
