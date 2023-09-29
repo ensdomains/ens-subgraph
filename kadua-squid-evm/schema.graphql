@@ -1,0 +1,13 @@
+type Burn @entity {
+  id: ID!
+  block: Int!
+  address: String! @index
+  value: BigInt!
+  txHash: String!
+}
+type Gravatar @entity {
+  id: ID!
+  owner: Bytes!
+  displayName: String!
+  imageUrl: String!
+}
