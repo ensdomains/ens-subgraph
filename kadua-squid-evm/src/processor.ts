@@ -17,8 +17,18 @@ export const processor = new EvmBatchProcessor()
     archive: lookupArchive('eth-mainnet'),
     chain: 'https://rpc.ankr.com/eth'
   })
-  .setBlockRange({ from: 6175243 })
+  .setBlockRange({ from: 6_000_000 })
   .setFinalityConfirmation(75)
+  .setfields({
+    transaction: {
+      from:true,
+      value:true,
+      hash:true,
+    },
+  })
+  .addTransaction({
+    to:['0x0000000000000000000000000000000000000000']
+  })
   .addLog({
     address: [ GRAVATAR_CONTRACT ],
     topic0: [
