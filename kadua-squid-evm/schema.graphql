@@ -5,7 +5,6 @@ type Burn @entity {
   value: BigInt!
   txHash: String!
 }
-
 type Gravatar @entity {
   id: ID!
   owner: Bytes!
