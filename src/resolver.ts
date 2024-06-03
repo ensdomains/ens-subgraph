@@ -15,6 +15,10 @@ import {
 } from "./types/Resolver/Resolver";
 
 import {
+  MetadataChanged as MetadataChangedEvent
+} from "./types/ContextResolver/ContextResolver";
+
+import {
   AbiChanged,
   Account,
   AddrChanged,
@@ -22,6 +26,7 @@ import {
   ContenthashChanged,
   Domain,
   InterfaceChanged,
+  Offchain,
   MulticoinAddrChanged,
   NameChanged,
   PubkeyChanged,
@@ -29,6 +34,16 @@ import {
   TextChanged,
   VersionChanged,
 } from "./types/schema";
+
+export function handleMetadataChanged(event: MetadataChangedEvent): void {
+  let offchain = new Offchain(event.address.toHexString());
+  offchain.name = event.params.name
+  offchain.coinType = event.params.coinType
+  offchain.graphqlUrl = event.params.graphqlUrl
+  offchain.storageType = event.params.storageType
+  offchain.context = event.params.context
+  offchain.save()
+}
 
 export function handleAddrChanged(event: AddrChangedEvent): void {
   let account = new Account(event.params.a.toHexString());

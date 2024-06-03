@@ -111,6 +111,24 @@ dataSources:
         - event: "VersionChanged(indexed bytes32,uint64)"
           handler: handleVersionChanged
   - kind: ethereum/contract
+    name: ContextResolver
+    network: mainnet
+    source:
+      abi: ContextResolver
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.6
+      language: wasm/assemblyscript
+      file: ./src/resolver.ts
+      entities:
+        - MetadataChanged
+      abis:
+        - name: ContextResolver
+          file: ./abis/ContextResolver.json
+      eventHandlers:
+        - event: "MetadataChanged(string,uint256,string,uint8,bytes)"
+          handler: handleMetadataChanged
+  - kind: ethereum/contract
     name: BaseRegistrar
     network: mainnet
     source:

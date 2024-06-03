@@ -278,6 +278,21 @@ type Account @entity {
   registrations: [Registration!] @derivedFrom(field: "registrant")
 }
 
+type Offchain @entity {
+  "l1 resolver address"
+  id: ID!
+  "Name of the Chain"
+  name: String
+  "coin type"
+  coinType: BigInt
+  "url of the graphql endpoint"
+  graphqlUrl: String
+  "0 for evm, 1 for non blockchain, 2 for starknet"
+  storageType: Int
+  "context, resolver address if evm Chain"
+  context: Bytes
+}
+
 type Resolver @entity {
   "The unique identifier for this resolver, which is a concatenation of the resolver address and the domain namehash"
   id: ID!
@@ -294,6 +309,7 @@ type Resolver @entity {
   "The set of observed SLIP-44 coin types for this resolver"
   coinTypes: [BigInt!]
   "The events associated with this resolver"
+  offchain: Offchain
   events: [ResolverEvent!]! @derivedFrom(field: "resolver")
 }
 

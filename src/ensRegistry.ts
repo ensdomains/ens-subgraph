@@ -25,6 +25,7 @@ import {
   NewOwner,
   NewResolver,
   NewTTL,
+  Offchain,
   Resolver,
   Transfer,
 } from "./types/schema";
@@ -189,6 +190,10 @@ export function handleNewResolver(event: NewResolverEvent): void {
       resolver = new Resolver(id);
       resolver.domain = event.params.node.toHexString();
       resolver.address = event.params.resolver;
+      let offchain = Offchain.load(event.params.resolver.toHexString());
+      if(offchain){
+        resolver.offchain = offchain.id;
+      }
       resolver.save();
       // since this is a new resolver entity, there can't be a resolved address yet so set to null
       domain.resolvedAddress = null;
