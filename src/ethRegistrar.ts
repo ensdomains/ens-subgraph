@@ -16,12 +16,15 @@ import {
   Transfer as TransferEvent,
 } from "./types/BaseRegistrar/BaseRegistrar";
 
-import { NameRegistered as ControllerNameRegisteredEventOld } from "./types/EthRegistrarControllerOld/EthRegistrarControllerOld";
-
 import {
-  NameRegistered as ControllerNameRegisteredEvent,
-  NameRenewed as ControllerNameRenewedEvent,
-} from "./types/EthRegistrarController/EthRegistrarController";
+  NameRegistered as LegacyEthRegistrarController_NameRegistered,
+  NameRenewed as LegacyEthRegistrarController_NameRenewed,
+} from "./types/LegacyEthRegistrarController/LegacyEthRegistrarController";
+import {
+  NameRegistered as UnwrappedEthRegistrarController_NameRegistered,
+  NameRenewed as UnwrappedEthRegistrarController_NameRenewed,
+} from "./types/UnwrappedEthRegistrarController/UnwrappedEthRegistrarController";
+import { NameRegistered as WrappedEthRegistrarController_NameRegistered } from "./types/WrappedEthRegistrarController/WrappedEthRegistrarController";
 
 // Import entity types generated from the GraphQL schema
 import {
@@ -71,14 +74,24 @@ export function handleNameRegistered(event: NameRegisteredEvent): void {
   registrationEvent.save();
 }
 
-export function handleNameRegisteredByControllerOld(
-  event: ControllerNameRegisteredEventOld
+// Legacy controller
+
+export function handleNameRegisteredByLegacyController(
+  event: LegacyEthRegistrarController_NameRegistered
 ): void {
   setNamePreimage(event.params.name, event.params.label, event.params.cost);
 }
 
-export function handleNameRegisteredByController(
-  event: ControllerNameRegisteredEvent
+export function handleNameRenewedByLegacyController(
+  event: LegacyEthRegistrarController_NameRenewed
+): void {
+  setNamePreimage(event.params.name, event.params.label, event.params.cost);
+}
+
+// Wrapped controller (reuses same renew event as legacy controller)
+
+export function handleNameRegisteredByWrappedController(
+  event: WrappedEthRegistrarController_NameRegistered
 ): void {
   setNamePreimage(
     event.params.name,
@@ -87,10 +100,26 @@ export function handleNameRegisteredByController(
   );
 }
 
-export function handleNameRenewedByController(
-  event: ControllerNameRenewedEvent
+// Unwrapped controller
+
+export function handleNameRegisteredByUnwrappedController(
+  event: UnwrappedEthRegistrarController_NameRegistered
 ): void {
-  setNamePreimage(event.params.name, event.params.label, event.params.cost);
+  setNamePreimage(
+    event.params.label,
+    event.params.labelhash,
+    event.params.baseCost.plus(event.params.premium)
+  );
+}
+
+export function handleNameRenewedByUnwrappedController(
+  event: UnwrappedEthRegistrarController_NameRenewed
+): void {
+  setNamePreimage(
+    event.params.label,
+    event.params.labelhash,
+    event.params.cost
+  );
 }
 
 function setNamePreimage(name: string, label: Bytes, cost: BigInt): void {
