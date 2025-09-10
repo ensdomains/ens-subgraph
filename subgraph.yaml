@@ -34,6 +34,7 @@ dataSources:
           handler: handleNewResolver
         - event: "NewTTL(indexed bytes32,uint64)"
           handler: handleNewTTL
+
   - kind: ethereum/contract
     name: ENSRegistryOld
     network: mainnet
@@ -62,6 +63,7 @@ dataSources:
           handler: handleNewResolverOldRegistry
         - event: "NewTTL(indexed bytes32,uint64)"
           handler: handleNewTTLOldRegistry
+
   - kind: ethereum/contract
     name: Resolver
     network: mainnet
@@ -110,6 +112,7 @@ dataSources:
           handler: handleTextChangedWithValue
         - event: "VersionChanged(indexed bytes32,uint64)"
           handler: handleVersionChanged
+
   - kind: ethereum/contract
     name: BaseRegistrar
     network: mainnet
@@ -137,12 +140,13 @@ dataSources:
           handler: handleNameRenewed
         - event: "Transfer(indexed address,indexed address,indexed uint256)"
           handler: handleNameTransferred
+
   - kind: ethereum/contract
-    name: EthRegistrarControllerOld
+    name: LegacyEthRegistrarController
     network: mainnet
     source:
       address: "0x283Af0B28c62C092C9727F1Ee09c02CA627EB7F5"
-      abi: EthRegistrarControllerOld
+      abi: LegacyEthRegistrarController
       startBlock: 9380471
     mapping:
       kind: ethereum/events
@@ -152,21 +156,22 @@ dataSources:
       entities:
         - Registration
       abis:
-        - name: EthRegistrarControllerOld
-          file: ./abis/EthRegistrarControllerOld.json
+        - name: LegacyEthRegistrarController
+          file: ./abis/LegacyEthRegistrarController.json
       eventHandlers:
         - event: >-
             NameRegistered(string,indexed bytes32,indexed
             address,uint256,uint256)
-          handler: handleNameRegisteredByControllerOld
+          handler: handleNameRegisteredByLegacyController
         - event: "NameRenewed(string,indexed bytes32,uint256,uint256)"
-          handler: handleNameRenewedByController
+          handler: handleNameRenewedByLegacyController
+
   - kind: ethereum/contract
-    name: EthRegistrarController
+    name: WrappedEthRegistrarController
     network: mainnet
     source:
       address: "0x253553366Da8546fC250F225fe3d25d0C782303b"
-      abi: EthRegistrarController
+      abi: WrappedEthRegistrarController
       startBlock: 16925618
     mapping:
       kind: ethereum/events
@@ -176,15 +181,16 @@ dataSources:
       entities:
         - Registration
       abis:
-        - name: EthRegistrarController
-          file: ./abis/EthRegistrarController.json
+        - name: WrappedEthRegistrarController
+          file: ./abis/WrappedEthRegistrarController.json
       eventHandlers:
         - event: >-
             NameRegistered(string,indexed bytes32,indexed
             address,uint256,uint256,uint256)
-          handler: handleNameRegisteredByController
+          handler: handleNameRegisteredByWrappedController
         - event: "NameRenewed(string,indexed bytes32,uint256,uint256)"
-          handler: handleNameRenewedByController
+          handler: handleNameRenewedByLegacyController
+
   - kind: ethereum/contract
     name: NameWrapper
     network: mainnet
@@ -215,3 +221,28 @@ dataSources:
           handler: handleTransferSingle
         - event: TransferBatch(indexed address,indexed address,indexed address,uint256[],uint256[])
           handler: handleTransferBatch
+
+  - kind: ethereum/contract
+    name: UnwrappedEthRegistrarController
+    network: mainnet
+    source:
+      address: "0x59E16fcCd424Cc24e280Be16E11Bcd56fb0CE547"
+      abi: UnwrappedEthRegistrarController
+      startBlock: 22764821
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.6
+      language: wasm/assemblyscript
+      file: ./src/ethRegistrar.ts
+      entities:
+        - Registration
+      abis:
+        - name: UnwrappedEthRegistrarController
+          file: ./abis/UnwrappedEthRegistrarController.json
+      eventHandlers:
+        - event: >-
+            NameRegistered(string,indexed bytes32,indexed
+            address,uint256,uint256,uint256,bytes32)
+          handler: handleNameRegisteredByUnwrappedController
+        - event: "NameRenewed(string,indexed bytes32,uint256,uint256,bytes32)"
+          handler: handleNameRenewedByUnwrappedController
