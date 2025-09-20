@@ -449,3 +449,18 @@ type VersionChanged implements ResolverEvent @entity(immutable: true) {
   "The new version number of the resolver"
   version: BigInt!
 }
+
+type SetTextCall implements ResolverEvent @entity(immutable: true) {
+  "Unique identifier for this call"
+  id: ID!
+  "The resolver associated with this call"
+  resolver: Resolver!
+  "The block number at which the call occurred"
+  blockNumber: Int!
+  "The transaction hash associated with the call"
+  transactionID: Bytes!
+  "The key of the text record that was changed"
+  key: String!
+  "The new value of the text record that was changed"
+  value: String
+}

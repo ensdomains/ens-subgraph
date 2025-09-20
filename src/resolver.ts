@@ -12,6 +12,7 @@ import {
   TextChanged as TextChangedEvent,
   TextChanged1 as TextChangedWithValueEvent,
   VersionChanged as VersionChangedEvent,
+  SetTextCall as SetTextCallEvent,
 } from "./types/Resolver/Resolver";
 
 import {
@@ -228,6 +229,39 @@ export function handleVersionChanged(event: VersionChangedEvent): void {
   resolver.texts = null;
   resolver.coinTypes = null;
   resolver.save();
+}
+
+import { SetTextCall } from "./types/schema";
+
+export function handleSetText(call: SetTextCallEvent): void {
+  const resolver = getOrCreateResolver(call.inputs.node, call.to, false);
+
+  const key = call.inputs.key;
+  if (resolver.texts == null) {
+    resolver.texts = [key];
+    resolver.save();
+  } else {
+    const texts = resolver.texts!;
+    if (!texts.includes(key)) {
+      texts.push(key);
+      resolver.texts = texts;
+      resolver.save();
+    }
+  }
+
+  const setText = new SetTextCall(
+    call.transaction.hash.toHexString() +
+      "-" +
+      call.to.toHexString() +
+      "-" +
+      key
+  );
+  setText.resolver = resolver.id;
+  setText.blockNumber = call.block.number.toI32();
+  setText.transactionID = call.transaction.hash;
+  setText.key = call.inputs.key;
+  setText.value = call.inputs.value;
+  setText.save();
 }
 
 function getOrCreateResolver(

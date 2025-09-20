@@ -112,6 +112,9 @@ dataSources:
           handler: handleTextChangedWithValue
         - event: "VersionChanged(indexed bytes32,uint64)"
           handler: handleVersionChanged
+      callHandlers:
+        - function: "setText(bytes32,string,string)"
+          handler: handleSetText
 
   - kind: ethereum/contract
     name: BaseRegistrar

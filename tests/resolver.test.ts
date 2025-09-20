@@ -5,6 +5,7 @@ import {
   clearStore,
   describe,
   newMockEvent,
+  newMockCall,
   test,
 } from "matchstick-as/assembly/index";
 import {
@@ -20,6 +21,7 @@ import {
   handleTextChanged,
   handleTextChangedWithValue,
   handleVersionChanged,
+  handleSetText,
 } from "../src/resolver";
 import {
   ABIChanged,
@@ -33,6 +35,7 @@ import {
   TextChanged,
   TextChanged1 as TextChangedWithValue,
   VersionChanged,
+  SetTextCall,
 } from "../src/types/Resolver/Resolver";
 import { Resolver } from "../src/types/schema";
 
@@ -471,5 +474,30 @@ describe("creates new resolver when resolver entity doesn't exist", () => {
     resolver = getResolver(mockEvent.address);
 
     assert.assertNotNull(resolver);
+  });
+  test("handleSetText", () => {
+    const mockCall = newMockCall();
+    const call = new SetTextCall(
+      mockCall.to,
+      mockCall.from,
+      mockCall.block,
+      mockCall.transaction,
+      [
+        new ethereum.EventParam("node", ethereum.Value.fromFixedBytes(namehash)),
+        new ethereum.EventParam("key", ethereum.Value.fromString("foo")),
+        new ethereum.EventParam("value", ethereum.Value.fromString("bar")),
+      ],
+      []
+    );
+
+    let resolver = getResolver(mockCall.to);
+    assert.assertNull(resolver);
+
+    handleSetText(call);
+
+    resolver = getResolver(mockCall.to);
+
+    assert.assertNotNull(resolver);
+    assert.stringEquals("foo", resolver!.texts![0]);
   });
 });
