@@ -1,8 +1,11 @@
 // Option B compatibility projection: every ENSv2NamePath materialised by
 // ensv2Paths.ts::materializePathsForSlot gets a legacy Domain row (this is
 // what lets existing ENSv1 consumers keep working unchanged for ENSv2-origin
-// names), and real .eth registrations additionally get a legacy Registration
-// row. Only ever creates rows for names that never existed in ENSv1.
+// names), and the canonical <label>.eth path additionally gets a legacy
+// Registration row. An ETHRegistry slot may be reachable through several
+// linked namespaces, but Registration.domain must remain the canonical .eth
+// Domain rather than whichever linked path was materialised last. Only ever
+// creates rows for names that never existed in ENSv1.
 //
 // For migrated names, domain.owner remains the ENSv1 registry-level owner,
 // since it reflects ENSv1 ENSRegistry-level
@@ -77,7 +80,8 @@ export function getEthDomainId(slot: ENSv2NameSlot): string | null {
 export function correctMigratedLegacyOwner(
   domainId: string,
   registrationId: string,
-  ownerId: string
+  ownerId: string,
+  updateRegistration: boolean
 ): void {
   let wrappedDomain = WrappedDomain.load(domainId);
   if (wrappedDomain != null) {
@@ -94,10 +98,17 @@ export function correctMigratedLegacyOwner(
       domain.registrant = ownerId;
       domain.save();
     }
-    let registration = Registration.load(registrationId);
-    if (registration != null) {
-      registration.registrant = ownerId;
-      registration.save();
+    // Several linked paths may project Domains for one ETHRegistry slot, but
+    // the legacy Registration belongs only to the canonical .eth Domain.
+    // Linked paths may update their own registrant without changing that
+    // shared Registration (especially important for locked migrations, whose
+    // canonical WrappedDomain intentionally retains the V1 registrant).
+    if (updateRegistration) {
+      let registration = Registration.load(registrationId);
+      if (registration != null) {
+        registration.registrant = ownerId;
+        registration.save();
+      }
     }
   }
 }
@@ -217,6 +228,11 @@ export function projectPathToDomain(
   // applied for real .eth registrations, where Domain.expiryDate has always
   // meant the true reregistration-availability date, not raw expiry.
   let isEth = slot.registry.equals(getEthRegistryAddress());
+  let namespace = ENSv2Namespace.load(path.namespace);
+  let isCanonicalEthPath = false;
+  if (isEth && namespace != null) {
+    isCanonicalEthPath = namespace.baseNamehash.equals(ETH_NODE);
+  }
   let slotExpiryDate = slot.expiryDate;
   if (isEth && slotExpiryDate) {
     domain.expiryDate = slotExpiryDate.plus(getV2GracePeriod());
@@ -229,13 +245,25 @@ export function projectPathToDomain(
   path.save();
 
   if (isEth) {
-    syncEthRegistration(slot, path, event, isV1Migration);
+    // ETHRegistry can serve multiple namespaces. The legacy Registration
+    // model has only one Domain relation, so bind it exclusively to the
+    // canonical <label>.eth path. Calling this for every linked path made the
+    // result depend on namespace iteration order and detached
+    // Domain.registration from the canonical .eth Domain.
+    if (isCanonicalEthPath) {
+      syncEthRegistration(slot, path, event, isV1Migration);
+    }
     // NameRegistered normally follows the registry events in the deployed
     // registrar, but keeping this reconciliation here makes fixtures and
     // replays with the opposite ordering converge to the same native row.
     syncRegistrationFromSlot(slot);
     if (isV1Migration) {
-      correctMigratedLegacyOwner(domain.id, slot.labelhash.toHexString(), ownerId!);
+      correctMigratedLegacyOwner(
+        domain.id,
+        slot.labelhash.toHexString(),
+        ownerId!,
+        isCanonicalEthPath
+      );
     }
   }
 }

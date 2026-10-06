@@ -1,4 +1,11 @@
-import { Address, BigInt, Bytes, ethereum } from "@graphprotocol/graph-ts";
+import {
+  Address,
+  BigInt,
+  ByteArray,
+  Bytes,
+  crypto,
+  ethereum,
+} from "@graphprotocol/graph-ts";
 import {
   afterEach,
   assert,
@@ -997,11 +1004,14 @@ test("fresh .eth registration produces Domain + Registration sharing the legacy 
 
   // ETHRegistry must first be linked under root's "eth" slot — its own
   // namespaceCount is 0 (and materializePathsForSlot a no-op) until then.
+  let ethLabelHash = Bytes.fromByteArray(
+    crypto.keccak256(ByteArray.fromUTF8("eth"))
+  );
   handleLabelRegistered(
     createLabelRegisteredEvent(
       ROOT_REGISTRY,
       slotToken(1),
-      Bytes.fromI32(79),
+      ethLabelHash,
       "eth"
     )
   );
@@ -1010,7 +1020,7 @@ test("fresh .eth registration produces Domain + Registration sharing the legacy 
   );
   let ethPathId = pathNamehash(
     Bytes.fromHexString(ROOT_NAMEHASH),
-    Bytes.fromI32(79)
+    ethLabelHash
   ).toHexString();
 
   let labelHash = Bytes.fromI32(80);
@@ -1037,6 +1047,96 @@ test("fresh .eth registration produces Domain + Registration sharing the legacy 
   );
   // v2GracePeriod is 2,419,200s (28 days) per src/ensv2Constants.ts.
   assert.fieldEquals("Domain", pathId, "expiryDate", "2002419200");
+});
+
+test("an ETHRegistry slot with several paths keeps legacy Registration.domain on the canonical .eth Domain", () => {
+  dataSourceMock.setNetwork("sepolia");
+
+  let ethLabelHash = Bytes.fromByteArray(
+    crypto.keccak256(ByteArray.fromUTF8("eth"))
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(1),
+      ethLabelHash,
+      "eth"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(1), ETH_REGISTRY)
+  );
+
+  // Link the same ETHRegistry under two additional namespaces before the
+  // label is registered. All three paths should receive compatibility
+  // Domains, but only <label>.eth is the legacy Registration's domain.
+  let aliasOneHash = Bytes.fromI32(81);
+  let aliasTwoHash = Bytes.fromI32(82);
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(2),
+      aliasOneHash,
+      "alias-one"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(2), ETH_REGISTRY)
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(3),
+      aliasTwoHash,
+      "alias-two"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(3), ETH_REGISTRY)
+  );
+
+  let labelHash = Bytes.fromI32(83);
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ETH_REGISTRY,
+      slotToken(4),
+      labelHash,
+      "multipath"
+    )
+  );
+
+  let canonicalPathId = pathNamehash(
+    pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), ethLabelHash),
+    labelHash
+  ).toHexString();
+  let aliasOnePathId = pathNamehash(
+    pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), aliasOneHash),
+    labelHash
+  ).toHexString();
+  let aliasTwoPathId = pathNamehash(
+    pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), aliasTwoHash),
+    labelHash
+  ).toHexString();
+
+  assert.fieldEquals("Domain", canonicalPathId, "name", "multipath.eth");
+  assert.fieldEquals(
+    "Domain",
+    aliasOnePathId,
+    "name",
+    "multipath.alias-one"
+  );
+  assert.fieldEquals(
+    "Domain",
+    aliasTwoPathId,
+    "name",
+    "multipath.alias-two"
+  );
+  assert.fieldEquals(
+    "Registration",
+    labelHash.toHexString(),
+    "domain",
+    canonicalPathId
+  );
 });
 
 test("late-linked path has no Domain row", () => {

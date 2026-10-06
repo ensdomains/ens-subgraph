@@ -347,6 +347,25 @@ function setupEthNamespace(): Bytes {
   return pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), ethLabelHash);
 }
 
+function addEthRegistryAliasNamespace(
+  tokenId: BigInt,
+  labelHash: Bytes,
+  label: string
+): Bytes {
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      tokenId,
+      labelHash,
+      label
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, tokenId, ETH_REGISTRY)
+  );
+  return pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), labelHash);
+}
+
 afterEach(() => {
   dataSourceMock.resetValues();
   clearStore();
@@ -355,6 +374,11 @@ afterEach(() => {
 test("unwrapped migration corrects registrant only, never owner, and a post-migration transfer keeps tracking it", () => {
   dataSourceMock.setNetwork("sepolia");
   let ethBaseNamehash = setupEthNamespace();
+  let aliasBaseNamehash = addEthRegistryAliasNamespace(
+    slotToken(998),
+    Bytes.fromI32(998),
+    "migration-alias"
+  );
 
   let labelHash = Bytes.fromI32(200);
   let domainId = pathNamehash(ethBaseNamehash, labelHash).toHexString();
@@ -408,6 +432,13 @@ test("unwrapped migration corrects registrant only, never owner, and a post-migr
   );
   // domain.owner is never touched by migration correction.
   assert.fieldEquals("Domain", domainId, "owner", GRAVEYARD);
+  assert.fieldEquals("Registration", registrationId, "domain", domainId);
+  assert.fieldEquals(
+    "Domain",
+    pathNamehash(aliasBaseNamehash, labelHash).toHexString(),
+    "name",
+    "unwrapped.migration-alias"
+  );
 
   // Post-migration transfer keeps the same legacy field tracking ownership.
   handleTokenResource(
@@ -521,6 +552,11 @@ test("wrapped-unlocked migration (no WrappedDomain) behaves the same as unwrappe
 test("wrapped-locked migration corrects wrappedOwner only, leaves registrant/owner untouched, and a post-migration transfer keeps tracking it", () => {
   dataSourceMock.setNetwork("sepolia");
   let ethBaseNamehash = setupEthNamespace();
+  let aliasBaseNamehash = addEthRegistryAliasNamespace(
+    slotToken(997),
+    Bytes.fromI32(997),
+    "locked-alias"
+  );
 
   let labelHash = Bytes.fromI32(202);
   let domainId = pathNamehash(ethBaseNamehash, labelHash).toHexString();
@@ -577,6 +613,19 @@ test("wrapped-locked migration corrects wrappedOwner only, leaves registrant/own
   assert.fieldEquals("Domain", domainId, "registrant", GRAVEYARD);
   assert.fieldEquals("Registration", registrationId, "registrant", GRAVEYARD);
   assert.fieldEquals("Domain", domainId, "owner", GRAVEYARD);
+  assert.fieldEquals("Registration", registrationId, "domain", domainId);
+  assert.fieldEquals(
+    "Domain",
+    pathNamehash(aliasBaseNamehash, labelHash).toHexString(),
+    "name",
+    "wrappedlocked.locked-alias"
+  );
+  assert.fieldEquals(
+    "Domain",
+    pathNamehash(aliasBaseNamehash, labelHash).toHexString(),
+    "registrant",
+    Address.fromString(OWNER).toHexString()
+  );
 
   handleTokenResource(
     createTokenResourceEvent(ETH_REGISTRY, tokenId, BigInt.fromI32(2))

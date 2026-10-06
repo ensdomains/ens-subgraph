@@ -606,7 +606,12 @@ function makeTokenTransfer(
         let domainId = getEthDomainId(slot);
         if (domainId) {
           if (slot.migratedFromV1) {
-            correctMigratedLegacyOwner(domainId, slot.labelhash.toHexString(), toAccount.id);
+            correctMigratedLegacyOwner(
+              domainId,
+              slot.labelhash.toHexString(),
+              toAccount.id,
+              true
+            );
           } else {
             updateEthDomainOwner(domainId, slot.labelhash.toHexString(), toAccount.id);
           }
