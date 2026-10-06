@@ -147,7 +147,7 @@ export function handleLinked(event: Linked): void {
   if (link != null) {
     let previousRecordId = link.record;
     if (previousRecordId) {
-      let previousRecord = ENSv2ResolverRecord.load(previousRecordId!);
+      let previousRecord = ENSv2ResolverRecord.load(previousRecordId);
       if (previousRecord != null) {
         deactivateRecordMembership(previousRecord, event.params.node);
       }

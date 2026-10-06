@@ -105,7 +105,7 @@ export function activeRecordMembershipAt(
   if (!linkedRecord) {
     return null;
   }
-  if (!linkedRecord!.equals(record.id)) {
+  if (!linkedRecord.equals(record.id)) {
     return null;
   }
   return membership;
@@ -227,7 +227,7 @@ export function attachDomainResolver(
     if (link.active) {
       let recordId = link.record;
       if (recordId) {
-        let record = ENSv2ResolverRecord.load(recordId!);
+        let record = ENSv2ResolverRecord.load(recordId);
         if (record != null) {
           replaceLegacyResolverSnapshot(record, node);
           return;

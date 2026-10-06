@@ -155,7 +155,7 @@ function createOrReactivateNamespace(
   namespace.parentTokenId = event.params.tokenId;
   let parentResourceId = parentSlot.currentResource;
   if (parentResourceId) {
-    let resourceEntity = ENSv2Resource.load(parentResourceId!);
+    let resourceEntity = ENSv2Resource.load(parentResourceId);
     if (resourceEntity != null) {
       namespace.parentResource = resourceEntity.resource;
     }
@@ -182,12 +182,12 @@ function upsertNamespaceLink(
     let newChildAddress: Bytes = isZeroAddress(event.params.subregistry)
       ? Bytes.empty()
       : event.params.subregistry;
-    let isSameTarget = previousChildAddress!.equals(newChildAddress);
+    let isSameTarget = previousChildAddress.equals(newChildAddress);
     if (!isSameTarget) {
       let oldLinkId = namespaceLinkId(
         parentRegistryId,
         parentSlot.slotId,
-        previousChildAddress!
+        previousChildAddress
       );
       let oldLink = ENSv2NamespaceLink.load(oldLinkId);
       if (oldLink != null) {
@@ -216,7 +216,7 @@ function upsertNamespaceLink(
   // Keep the link's parent resource aligned with its namespace metadata.
   let parentResourceId = parentSlot.currentResource;
   if (parentResourceId) {
-    let resourceEntity = ENSv2Resource.load(parentResourceId!);
+    let resourceEntity = ENSv2Resource.load(parentResourceId);
     if (resourceEntity != null) {
       link.parentResource = resourceEntity.resource;
     }
@@ -326,7 +326,7 @@ export function handleSubregistryUpdated(event: SubregistryUpdated): void {
     if (previousChildAddress) {
       deactivateNamespacesFromParentSlot(
         parentSlot,
-        previousChildAddress!,
+        previousChildAddress,
         event.block
       );
     }
@@ -339,8 +339,8 @@ export function handleSubregistryUpdated(event: SubregistryUpdated): void {
   // Without this, namespaces from the superseded registry A stay
   // active:true forever and can resurface if A later gets its own
   // registrations.
-  if (previousChildAddress && !previousChildAddress!.equals(event.params.subregistry)) {
-    deactivateNamespacesFromParentSlot(parentSlot, previousChildAddress!, event.block);
+  if (previousChildAddress && !previousChildAddress.equals(event.params.subregistry)) {
+    deactivateNamespacesFromParentSlot(parentSlot, previousChildAddress, event.block);
   }
 
   let childRegistry = getOrCreateRegistry(
@@ -440,8 +440,8 @@ function materializeNamePath(
   path.label = label;
 
   if (parentPathId) {
-    path.parent = parentPathId!;
-    let parentPath = ENSv2NamePath.load(parentPathId!);
+    path.parent = parentPathId;
+    let parentPath = ENSv2NamePath.load(parentPathId);
     if (parentPath != null) {
       depth = parentPath.depth + 1;
       if (parentPath.name !== null && label !== null) {

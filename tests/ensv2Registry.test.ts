@@ -38,8 +38,8 @@ import {
   ENSv2Token,
 } from "../src/types/schema";
 
-const ROOT_REGISTRY = "0x9703DBD26dAB89504490994138cF2c575251a9cE";
-const ETH_REGISTRY = "0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E";
+const ROOT_REGISTRY = "0xB458D6a3a77919449d03e7A6903C26827c1eC43f";
+const ETH_REGISTRY = "0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4";
 const OWNER = "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7";
 const SENDER = "0x11111111111111111111111111111111111111aa";
 const ROOT_NAMEHASH =
@@ -984,7 +984,8 @@ test("unregister then re-register creates a new resource and leaves the old one 
 const createParentUpdatedEvent = (
   registryAddress: string,
   parent: string,
-  label: string
+  label: string,
+  sender: string
 ): ParentUpdated => {
   let mockEvent = newMockEvent();
   let event = new ParentUpdated(
@@ -1005,7 +1006,7 @@ const createParentUpdatedEvent = (
     new ethereum.EventParam("label", ethereum.Value.fromString(label))
   );
   event.parameters.push(
-    new ethereum.EventParam("sender", ethereum.Value.fromAddress(Address.fromString(SENDER)))
+    new ethereum.EventParam("sender", ethereum.Value.fromAddress(Address.fromString(sender)))
   );
   return event;
 };
@@ -1017,7 +1018,12 @@ test("handleParentUpdated sets canonicalParentRegistry/Label, then clears both w
   const parentAddress = "0xffffffffffffffffffffffffffffffffffffffff";
   const zeroAddress = "0x0000000000000000000000000000000000000000";
 
-  const setEvent = createParentUpdatedEvent(registryAddress, parentAddress, "parentlabel");
+  const setEvent = createParentUpdatedEvent(
+    registryAddress,
+    parentAddress,
+    "parentlabel",
+    SENDER
+  );
   handleParentUpdated(setEvent);
 
   assert.fieldEquals(
@@ -1041,7 +1047,8 @@ test("handleParentUpdated sets canonicalParentRegistry/Label, then clears both w
   const secondSetEvent = createParentUpdatedEvent(
     registryAddress,
     secondParentAddress,
-    "secondlabel"
+    "secondlabel",
+    SENDER
   );
   handleParentUpdated(secondSetEvent);
 
@@ -1067,7 +1074,8 @@ test("handleParentUpdated sets canonicalParentRegistry/Label, then clears both w
   const invalidLabelEvent = createParentUpdatedEvent(
     registryAddress,
     thirdParentAddress,
-    "invalid.label"
+    "invalid.label",
+    SENDER
   );
   handleParentUpdated(invalidLabelEvent);
 
@@ -1088,7 +1096,12 @@ test("handleParentUpdated sets canonicalParentRegistry/Label, then clears both w
   }
   assert.assertTrue(!hasStaleOrInvalidLabel);
 
-  const clearEvent = createParentUpdatedEvent(registryAddress, zeroAddress, "");
+  const clearEvent = createParentUpdatedEvent(
+    registryAddress,
+    zeroAddress,
+    "",
+    SENDER
+  );
   handleParentUpdated(clearEvent);
 
   let hasParentRegistry = false;
@@ -1109,7 +1122,8 @@ test("handleParentUpdated sets canonicalParentRegistry/Label, then clears both w
 const createURIUpdatedEvent = (
   registryAddress: string,
   uri: string,
-  renderer: string
+  renderer: string,
+  sender: string
 ): URIUpdated => {
   let mockEvent = newMockEvent();
   let event = new URIUpdated(
@@ -1130,7 +1144,7 @@ const createURIUpdatedEvent = (
     new ethereum.EventParam("renderer", ethereum.Value.fromAddress(Address.fromString(renderer)))
   );
   event.parameters.push(
-    new ethereum.EventParam("sender", ethereum.Value.fromAddress(Address.fromString(SENDER)))
+    new ethereum.EventParam("sender", ethereum.Value.fromAddress(Address.fromString(sender)))
   );
   return event;
 };
@@ -1142,7 +1156,12 @@ test("handleURIUpdated sets uri/uriRenderer on the registry, and a later call ov
   const rendererA = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const rendererB = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-  const firstEvent = createURIUpdatedEvent(registryAddress, "ipfs://first", rendererA);
+  const firstEvent = createURIUpdatedEvent(
+    registryAddress,
+    "ipfs://first",
+    rendererA,
+    SENDER
+  );
   handleURIUpdated(firstEvent);
 
   assert.fieldEquals("ENSv2Registry", registryAddress, "uri", "ipfs://first");
@@ -1153,7 +1172,12 @@ test("handleURIUpdated sets uri/uriRenderer on the registry, and a later call ov
     Address.fromString(rendererA).toHexString()
   );
 
-  const secondEvent = createURIUpdatedEvent(registryAddress, "ipfs://second", rendererB);
+  const secondEvent = createURIUpdatedEvent(
+    registryAddress,
+    "ipfs://second",
+    rendererB,
+    SENDER
+  );
   handleURIUpdated(secondEvent);
 
   assert.fieldEquals("ENSv2Registry", registryAddress, "uri", "ipfs://second");
@@ -1163,4 +1187,52 @@ test("handleURIUpdated sets uri/uriRenderer on the registry, and a later call ov
     "uriRenderer",
     Address.fromString(rendererB).toHexString()
   );
+});
+
+test("WrapperRegistry initialization accepts zero-sender parent and URI events", () => {
+  dataSourceMock.setNetwork("sepolia");
+
+  const registryAddress = "0xdddddddddddddddddddddddddddddddddddddd01";
+  const parentAddress = "0xdddddddddddddddddddddddddddddddddddddd02";
+  const renderer = "0x0f5B101b6Fc626b9b210bB5E70f60F3dd9cA0d96";
+  const zeroAddress = "0x0000000000000000000000000000000000000000";
+
+  handleParentUpdated(
+    createParentUpdatedEvent(
+      registryAddress,
+      parentAddress,
+      "wrapped-label",
+      zeroAddress
+    )
+  );
+  handleURIUpdated(
+    createURIUpdatedEvent(registryAddress, "", renderer, zeroAddress)
+  );
+
+  assert.fieldEquals(
+    "ENSv2Registry",
+    registryAddress,
+    "canonicalParentRegistry",
+    Address.fromString(parentAddress).toHexString()
+  );
+  assert.fieldEquals(
+    "ENSv2Registry",
+    registryAddress,
+    "canonicalParentLabel",
+    "wrapped-label"
+  );
+  let registry = ENSv2Registry.load(Address.fromString(registryAddress));
+  assert.assertTrue(registry != null);
+  // The generated nullable-string setter represents an empty URI as null;
+  // the non-null renderer is the active metadata source in this state.
+  assert.assertTrue(registry!.uri == null);
+  assert.fieldEquals(
+    "ENSv2Registry",
+    registryAddress,
+    "uriRenderer",
+    Address.fromString(renderer).toHexString()
+  );
+  assert.entityCount("Account", 0);
+  assert.entityCount("ENSv2RoleAssignment", 0);
+  assert.entityCount("ENSv2RoleChange", 0);
 });

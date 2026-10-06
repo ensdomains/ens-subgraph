@@ -309,9 +309,9 @@ dataSources:
     name: RootRegistry
     network: mainnet
     source:
-      address: "0x9703DBD26dAB89504490994138cF2c575251a9cE"
+      address: "0xB458D6a3a77919449d03e7A6903C26827c1eC43f"
       abi: PermissionedRegistry
-      startBlock: 11708988
+      startBlock: 11820291
     # RootRegistry, ETHRegistry, and the dynamic registry template share the
     # same PermissionedRegistry mapping.
     mapping: &ensv2RegistryMapping
@@ -392,18 +392,18 @@ dataSources:
     name: ETHRegistry
     network: mainnet
     source:
-      address: "0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E"
+      address: "0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4"
       abi: PermissionedRegistry
-      startBlock: 11709066
+      startBlock: 11820399
     mapping: *ensv2RegistryMapping
 
   - kind: ethereum/contract
     name: ETHRegistrar
     network: mainnet
     source:
-      address: "0xAbe76F6C8DFcEd81AA5A2bB8034202A7136b94ca"
+      address: "0xf633e7FC17e2bbE0D0965D18ec1821dcB754a3d3"
       abi: ETHRegistrar
-      startBlock: 11709083
+      startBlock: 11820440
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -428,9 +428,9 @@ dataSources:
     name: VerifiableFactory
     network: mainnet
     source:
-      address: "0x9e726Eb570beb6BCEb495AB8cdA7df517d4e841C"
+      address: "0xDa70306C98E97eCe36F997a21368e53298572991"
       abi: VerifiableFactory
-      startBlock: 11708995
+      startBlock: 11820318
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

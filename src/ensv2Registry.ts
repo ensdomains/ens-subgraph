@@ -101,7 +101,7 @@ function deactivateSlotIncarnation(
 ): void {
   let currentTokenId = slot.currentToken;
   if (currentTokenId) {
-    let token = ENSv2Token.load(currentTokenId!);
+    let token = ENSv2Token.load(currentTokenId);
     if (token != null) {
       token.active = false;
       token.owner = null;
@@ -112,7 +112,7 @@ function deactivateSlotIncarnation(
 
   let currentResourceId = slot.currentResource;
   if (currentResourceId) {
-    let resource = ENSv2Resource.load(currentResourceId!);
+    let resource = ENSv2Resource.load(currentResourceId);
     if (resource != null) {
       resource.active = false;
       resource.endedAt = timestamp;
@@ -342,7 +342,7 @@ export function handleExpiryUpdated(event: ExpiryUpdated): void {
     }
     let domainId = getEthDomainId(slot);
     if (domainId) {
-      let domain = Domain.load(domainId!);
+      let domain = Domain.load(domainId);
       if (domain != null) {
         domain.expiryDate = event.params.newExpiry.plus(getV2GracePeriod());
         domain.save();
@@ -426,9 +426,9 @@ export function handleTokenResource(event: TokenResource): void {
   // Re-registration burns the old token and mints a new one. Regeneration is
   // handled separately by handleTokenRegenerated.
   if (previousTokenId) {
-    let isDifferentToken = !previousTokenId!.equals(token.id);
+    let isDifferentToken = !previousTokenId.equals(token.id);
     if (isDifferentToken) {
-      let oldToken = ENSv2Token.load(previousTokenId!);
+      let oldToken = ENSv2Token.load(previousTokenId);
       if (oldToken != null) {
         oldToken.active = false;
         oldToken.updatedAtBlock = event.block.number;
@@ -440,9 +440,9 @@ export function handleTokenResource(event: TokenResource): void {
   // Narrow nullable Bytes before calling .equals().
   let previousResourceId = slot.currentResource;
   if (previousResourceId) {
-    let isDifferentResource = !previousResourceId!.equals(resourceEntity.id);
+    let isDifferentResource = !previousResourceId.equals(resourceEntity.id);
     if (isDifferentResource) {
-      let oldResource = ENSv2Resource.load(previousResourceId!);
+      let oldResource = ENSv2Resource.load(previousResourceId);
       if (oldResource != null) {
         oldResource.active = false;
         oldResource.endedAt = event.block.timestamp;
@@ -501,14 +501,14 @@ export function handleTokenRegenerated(event: TokenRegenerated): void {
   // had a resolved slot.
   let oldTokenSlotId = oldToken.slot;
   if (oldTokenSlotId) {
-    let slot = ENSv2NameSlot.load(oldTokenSlotId!);
+    let slot = ENSv2NameSlot.load(oldTokenSlotId);
     if (slot != null) {
       let slotOwner = slot.owner;
       if (slotOwner) {
         // TransferSingle burn runs before TokenRegenerated and correctly
         // clears the old token's owner. The still-registered slot remains
         // authoritative for the replacement token.
-        newToken.owner = slotOwner!;
+        newToken.owner = slotOwner;
         newToken.save();
       }
       slot.currentToken = newToken.id;
@@ -520,7 +520,7 @@ export function handleTokenRegenerated(event: TokenRegenerated): void {
     }
     let oldTokenResourceEntityId = oldToken.resourceEntity;
     if (oldTokenResourceEntityId) {
-      let resourceEntity = ENSv2Resource.load(oldTokenResourceEntityId!);
+      let resourceEntity = ENSv2Resource.load(oldTokenResourceEntityId);
       if (resourceEntity != null) {
         resourceEntity.currentToken = newToken.id;
         resourceEntity.updatedAtBlock = event.block.number;
@@ -529,7 +529,7 @@ export function handleTokenRegenerated(event: TokenRegenerated): void {
     }
 
     let history = new ENSv2TokenRegenerated(createEventID(event));
-    history.slot = oldTokenSlotId!;
+    history.slot = oldTokenSlotId;
     history.blockNumber = event.block.number;
     history.transactionID = event.transaction.hash;
     history.logIndex = event.logIndex;
@@ -575,12 +575,12 @@ function makeTokenTransfer(
 
   let tokenSlotId = token.slot;
   if (tokenSlotId) {
-    let slot = ENSv2NameSlot.load(tokenSlotId!);
+    let slot = ENSv2NameSlot.load(tokenSlotId);
     if (slot != null) {
       let expiry = slot.expiryDate;
       let isExpiredBurn = false;
       if (isBurn && expiry) {
-        isExpiredBurn = expiry!.le(block.timestamp);
+        isExpiredBurn = expiry.le(block.timestamp);
       }
       let isLifecycleBurn =
         isBurn && (slot.status == "AVAILABLE" || isExpiredBurn);
@@ -606,16 +606,16 @@ function makeTokenTransfer(
         let domainId = getEthDomainId(slot);
         if (domainId) {
           if (slot.migratedFromV1) {
-            correctMigratedLegacyOwner(domainId!, slot.labelhash.toHexString(), toAccount.id);
+            correctMigratedLegacyOwner(domainId, slot.labelhash.toHexString(), toAccount.id);
           } else {
-            updateEthDomainOwner(domainId!, slot.labelhash.toHexString(), toAccount.id);
+            updateEthDomainOwner(domainId, slot.labelhash.toHexString(), toAccount.id);
           }
         }
       }
     }
 
     let history = new ENSv2TokenTransferred(eventId);
-    history.slot = tokenSlotId!;
+    history.slot = tokenSlotId;
     history.blockNumber = block.number;
     history.transactionID = transactionID;
     history.logIndex = logIndex;

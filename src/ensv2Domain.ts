@@ -144,7 +144,7 @@ function syncEthRegistration(
   registration.domain = path.id.toHexString();
   let slotExpiryDate = slot.expiryDate;
   if (slotExpiryDate) {
-    registration.expiryDate = slotExpiryDate!;
+    registration.expiryDate = slotExpiryDate;
   }
   // Existing migrated rows are corrected by correctMigratedLegacyOwner so
   // wrapped names do not receive a registrant. New rows need this required
@@ -152,7 +152,7 @@ function syncEthRegistration(
   if (!isV1Migration || isNewRegistration) {
     let registrantId = slot.registrant;
     if (registrantId) {
-      registration.registrant = registrantId!;
+      registration.registrant = registrantId;
     }
   }
   if (checkValidLabel(slot.label)) {
@@ -200,14 +200,14 @@ export function projectPathToDomain(
   if (!isV1Migration) {
     let registrantId = slot.registrant;
     if (registrantId) {
-      domain.registrant = registrantId!;
+      domain.registrant = registrantId;
     }
   }
   domain.isMigrated = true;
 
   let parentPathId = path.parent;
   if (parentPathId) {
-    let parentPath = ENSv2NamePath.load(parentPathId!);
+    let parentPath = ENSv2NamePath.load(parentPathId);
     if (parentPath != null && parentPath.domain) {
       domain.parent = parentPath.domain!;
     }
@@ -219,7 +219,7 @@ export function projectPathToDomain(
   let isEth = slot.registry.equals(getEthRegistryAddress());
   let slotExpiryDate = slot.expiryDate;
   if (isEth && slotExpiryDate) {
-    domain.expiryDate = slotExpiryDate!.plus(getV2GracePeriod());
+    domain.expiryDate = slotExpiryDate.plus(getV2GracePeriod());
   } else {
     domain.expiryDate = slotExpiryDate;
   }

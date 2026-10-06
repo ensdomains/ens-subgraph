@@ -10,8 +10,8 @@ export function getMigrationControllers(): Address[] {
   let network = dataSource.network();
   if (network == "sepolia") {
     return [
-      Address.fromString("0xab1B57C6eE5E91e6090595c0AF14CB9B8bc7773f"), // LockedMigrationController
-      Address.fromString("0x7ed171bb143a905F56105e4eA146543Ecb122F55"), // UnlockedMigrationController
+      Address.fromString("0x6029a063d69b09D23c52a754a90E4FE43aDac3A8"), // LockedMigrationController
+      Address.fromString("0x2a35B94DF22cc7354570be2284655E2CDC0e64A2"), // UnlockedMigrationController
     ];
   }
   log.critical(
@@ -41,7 +41,7 @@ export function getV2GracePeriod(): BigInt {
   if (network == "sepolia") {
     // 28 days (2,419,200s) — contracts-v2/contracts/script/deploy-constants.ts
     // sets GRACE_PERIOD_V2 to this. Verified against the current Sepolia
-    // ETHRenewerV1 deployment (0xd06e726e9bd8ac0f33a2a45f4cc28fe10d656a36):
+    // ETHRenewerV1 deployment (0xf2ece44980778966b8a0fccb3a9e339440f6e045):
     // GRACE_PERIOD() returns 7776001, exactly PREMIGRATION_BONUS_PERIOD
     // (5356801) + GRACE_PERIOD_V2 (2419200).
     return BigInt.fromI32(2419200);
@@ -61,7 +61,7 @@ export function getV2GracePeriod(): BigInt {
 export function getRootRegistryAddress(): Address {
   let network = dataSource.network();
   if (network == "sepolia") {
-    return Address.fromString("0x9703DBD26dAB89504490994138cF2c575251a9cE");
+    return Address.fromString("0xB458D6a3a77919449d03e7A6903C26827c1eC43f");
   }
   log.critical(
     "getRootRegistryAddress: no RootRegistry address configured for network '{}'. Refusing to silently return the zero address (which would collapse every registry-id/kind lookup onto one bogus bucket) — add the real address for this network or fix the manifest's network label.",
@@ -73,7 +73,7 @@ export function getRootRegistryAddress(): Address {
 export function getEthRegistryAddress(): Address {
   let network = dataSource.network();
   if (network == "sepolia") {
-    return Address.fromString("0x657eA849311d3D5823348ddEd7C2AaAFb3EDE09E");
+    return Address.fromString("0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4");
   }
   log.critical(
     "getEthRegistryAddress: no ETHRegistry address configured for network '{}'. Refusing to silently return the zero address (which would collapse every ENSv2Registration id onto one bogus bucket) — add the real address for this network or fix the manifest's network label.",
@@ -90,7 +90,7 @@ export function getEthRegistryAddress(): Address {
 export function getUserRegistryImplAddress(): Address {
   let network = dataSource.network();
   if (network == "sepolia") {
-    return Address.fromString("0xA80338aAA8D23831cEa25E858D1774534aBb0263");
+    return Address.fromString("0x9BD8a88719068D09ecee662f36C0E3856708366a");
   }
   log.critical(
     "getUserRegistryImplAddress: no UserRegistry implementation address configured for network '{}'. Refusing to silently return the zero address (which would misclassify every USER registry as UNKNOWN) — add the real address for this network or fix the manifest's network label.",
@@ -102,7 +102,7 @@ export function getUserRegistryImplAddress(): Address {
 export function getWrapperRegistryImplAddress(): Address {
   let network = dataSource.network();
   if (network == "sepolia") {
-    return Address.fromString("0x2741543c3B14640b97bC70a233318032f7E35bAC");
+    return Address.fromString("0xBe768b63E5fBBFBB0Ae97E9064E0002dF8001880");
   }
   log.critical(
     "getWrapperRegistryImplAddress: no WrapperRegistry implementation address configured for network '{}'. Refusing to silently return the zero address (which would misclassify every WRAPPER registry as UNKNOWN) — add the real address for this network or fix the manifest's network label.",
@@ -114,7 +114,7 @@ export function getWrapperRegistryImplAddress(): Address {
 export function getPermissionedResolverImplAddress(): Address {
   let network = dataSource.network();
   if (network == "sepolia") {
-    return Address.fromString("0x14F09Fd05d4585759e54844DC9B00147131Cf243");
+    return Address.fromString("0x115eb53F0c60696633855F90b138178Fb40b2b2C");
   }
   log.critical(
     "getPermissionedResolverImplAddress: no PermissionedResolver implementation address configured for network '{}'. Refusing to silently return the zero address (which would fail to recognize resolver ProxyDeployed events, creating a bogus ENSv2Registry row for each one) — add the real address for this network or fix the manifest's network label.",
@@ -133,7 +133,7 @@ export function getPermissionedResolverImplAddress(): Address {
 export function getStandaloneHCAImplAddress(): Address {
   let network = dataSource.network();
   if (network == "sepolia") {
-    return Address.fromString("0xdF4a24c42921810fed9363b07292E9152578D706");
+    return Address.fromString("0xC940e5C5bF263C0e097054AECf73826769A72CEE");
   }
   log.critical(
     "getStandaloneHCAImplAddress: no StandaloneHCA implementation address configured for network '{}'. Refusing to silently return the zero address (which would fail to recognize HCA ProxyDeployed events, creating a bogus ENSv2Registry row for each one) — add the real address for this network or fix the manifest's network label.",

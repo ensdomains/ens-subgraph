@@ -36,11 +36,11 @@ export function syncRegistrationFromSlot(slot: ENSv2NameSlot): void {
   }
   let expiryDate = slot.expiryDate;
   if (expiryDate) {
-    registration.expiryDate = expiryDate!;
+    registration.expiryDate = expiryDate;
   }
   let resource = slot.currentResource;
   if (resource) {
-    registration.resource = resource!;
+    registration.resource = resource;
   }
   let path = ENSv2NamePath.load(pathNamehash(ETH_NODE, slot.labelhash));
   if (path != null) {
