@@ -109,6 +109,7 @@ The ENSv2 upgrade added a second, parallel set of entities (`ENSv2Registry`, `EN
 - **Default-record fallback is native-only.** A name with no explicit `_recordIds` entry resolves through the record linked to the DNS root name. That affected name set is not enumerable, so the subgraph does not copy the root record into every legacy `Resolver`. Query the native link/record graph and call `PermissionedResolver.resolve()` when exact effective resolution, including fallback, is required.
 - **Shared-record fanout is an accepted Sepolia operational risk.** A record update currently rebuilds the representable legacy snapshot for every active explicit link, so work grows with both linked-name count and the record's observed address/text keys. ENS expects explicit sharing to remain rare and gates it behind `ROLE_LINK`; monitor indexing lag and subgraph health on Sepolia and revisit field-specific fanout or native-only projection if actual usage is materially higher. There is deliberately no silent fanout cap that could leave only some names stale.
 - **PublicResolverV2 remains node-keyed.** It emits classic profile events and is covered once by the existing addressless `Resolver` handlers; its `DataChanged` profile is additionally exposed as `ENSv2ResolverData`.
+- **`ENSv2PrimaryName` covers only the ENSIP-19 "default" (chain-agnostic) reverse record**, set via `DefaultReverseRegistrar.setName()`/`setNameForAddr()`/`setNameForAddrWithSignature()` — a flat `address → name` mapping, entirely separate from the legacy node-keyed `addr.reverse` scheme (already covered generically by the existing v1 `ENSRegistry`/`Resolver` handlers, since those match any node including reverse ones). A coin-type-specific (non-default) reverse record, or an L2 chain's own reverse registrar, is a different mechanism and out of scope here.
 - **Migrated `.eth` names carry both legacy and ENSv2 state.** Once a migrated name reaches `REGISTERED` status, ENSv2 events keep the legacy `Registration`/`Domain`/`WrappedDomain` owner and expiry fields in sync going forward — `domain.owner` itself is never corrected (it reflects the real, retired ENSv1 registry state), only `wrappedOwner`/`registrant`. `Registration.expiryDate` stays the raw ENSv2 expiry; `Domain.expiryDate` includes the ENSv2 grace period on top of it.
 
 Note on query field casing: graph-node derives root query field names from entity type names by lowercasing the whole `ENSv2` prefix, not just the first character — so `ENSv2Registry` becomes `ensv2Registry`/`ensv2Registries`, confirmed directly against a live deployment's introspection schema.
@@ -201,6 +202,17 @@ ENSv2 native IDs are `Bytes`, encoded as fixed-width concatenation without separ
         value
       }
     }
+  }
+}
+```
+
+## Example query: ENSIP-19 default primary name for an address
+
+```graphql
+{
+  ensv2PrimaryName(id: "0x<40-hex-address>") {
+    name
+    blockNumber
   }
 }
 ```

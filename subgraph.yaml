@@ -504,6 +504,32 @@ dataSources:
         - event: "NameUpdated(indexed uint256,string)"
           handler: handleNameUpdated
 
+  # DefaultReverseRegistrar is a single, pre-existing upstream ens-contracts
+  # deployment (not redeployed per contracts-v2 release, unlike the sources
+  # above) — see ensv2Reverse.ts and schema.graphql's ENSv2PrimaryName
+  # comment for what this does and does not cover.
+  - kind: ethereum/contract
+    name: DefaultReverseRegistrar
+    network: mainnet
+    source:
+      address: "0x4F382928805ba0e23B30cFB75fC9E848e82DFD47"
+      abi: DefaultReverseRegistrar
+      startBlock: 8579966
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/ensv2Reverse.ts
+      entities:
+        - ENSv2PrimaryName
+        - Account
+      abis:
+        - name: DefaultReverseRegistrar
+          file: ./abis/v2/DefaultReverseRegistrar.json
+      eventHandlers:
+        - event: "NameForAddrChanged(indexed address,string)"
+          handler: handleNameForAddrChanged
+
 templates:
   - kind: ethereum/contract
     name: ENSv2Registry

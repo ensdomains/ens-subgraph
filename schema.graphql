@@ -536,6 +536,30 @@ type ENSv2HCA @entity(immutable: false) {
   createdAtBlock: BigInt!
 }
 
+# ENSIP-19 "default" (chain-agnostic) primary name, set via
+# DefaultReverseRegistrar.setName()/setNameForAddr()/setNameForAddrWithSignature()
+# — a flat address -> name mapping (contracts-v2's
+# lib/ens-contracts/contracts/reverseRegistrar/StandaloneReverseRegistrar.sol
+# ::_names), entirely separate from the legacy node-keyed addr.reverse scheme
+# the existing v1 ENSRegistry/Resolver sources already pick up generically
+# (NewResolver/NameChanged on any node, including addr.reverse subnodes).
+# Deliberately NOT named ENSv2ReverseRecord/PrimaryName-generic: this entity
+# is specifically the ENSIP-19 "default" reverse record, not a general
+# reverse-resolution model — a coin-type-specific (non-default) reverse
+# record would be a different mechanism/contract entirely, out of scope here.
+type ENSv2PrimaryName @entity(immutable: false) {
+  id: Bytes! # the address itself
+  account: Account!
+  # Null exactly when the last NameForAddrChanged carried an empty string —
+  # the contract's own clearing convention (StandaloneReverseRegistrar has no
+  # separate "cleared" event), matching this schema's established pattern for
+  # other entities where an empty/zero value is the clear signal.
+  name: String
+  blockNumber: BigInt!
+  transactionID: Bytes!
+  logIndex: BigInt!
+}
+
 type ENSv2NameSlot @entity(immutable: false) {
   id: Bytes! # registry-address + slotId
   registry: ENSv2Registry!
