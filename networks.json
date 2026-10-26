@@ -82,6 +82,10 @@
     },
     "PermissionedResolver": {
       "startBlock": 11820406
+    },
+    "DefaultReverseRegistrar": {
+      "address": "0x4F382928805ba0e23B30cFB75fC9E848e82DFD47",
+      "startBlock": 8579966
     }
   },
   "holesky": {
