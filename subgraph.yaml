@@ -297,21 +297,20 @@ dataSources:
 
   # ---------------------------------------------------------------------
   # ENSv2 — additive data sources.
-  # The committed manifest retains the repository's mainnet default. The v2
-  # addresses below are temporary Sepolia placeholders until ENSv2 is deployed
-  # on mainnet. Do not deploy this raw manifest to mainnet. Build/deploy with
-  # `--network sepolia` so graph-cli replaces every source parameter from
-  # networks.json. Before a mainnet deployment, add the five missing ENSv2
-  # entries and per-network constants, then run the network validator.
+  # The values below are the committed mainnet production defaults. The
+  # network-specific build wrapper validates them against networks.json and
+  # substitutes the selected network's addresses and start blocks.
+  # Use `--network mainnet` for production or `--network sepolia` for Sepolia.
+  # Keep subgraph.yaml and networks.json synchronized.
   # ---------------------------------------------------------------------
 
   - kind: ethereum/contract
     name: RootRegistry
     network: mainnet
     source:
-      address: "0xB458D6a3a77919449d03e7A6903C26827c1eC43f"
+      address: "0x2553c09be6447beffdb86fa622ad41fb8f77a91e"
       abi: PermissionedRegistry
-      startBlock: 11820291
+      startBlock: 26183742
     # RootRegistry, ETHRegistry, and the dynamic registry template share the
     # same PermissionedRegistry mapping.
     mapping: &ensv2RegistryMapping
@@ -392,18 +391,18 @@ dataSources:
     name: ETHRegistry
     network: mainnet
     source:
-      address: "0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4"
+      address: "0xf60aba43e1f7f3dab1186ff03b561401c9df85e2"
       abi: PermissionedRegistry
-      startBlock: 11820399
+      startBlock: 26105621
     mapping: *ensv2RegistryMapping
 
   - kind: ethereum/contract
     name: ETHRegistrar
     network: mainnet
     source:
-      address: "0xf633e7FC17e2bbE0D0965D18ec1821dcB754a3d3"
+      address: "0xd6d8369e55c94ae8afa714e6cf7ab5be54d5cc81"
       abi: ETHRegistrar
-      startBlock: 11820440
+      startBlock: 26183999
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -428,9 +427,9 @@ dataSources:
     name: VerifiableFactory
     network: mainnet
     source:
-      address: "0xDa70306C98E97eCe36F997a21368e53298572991"
+      address: "0x77510ba162dfea3d8989e3f0928a691b345730d2"
       abi: VerifiableFactory
-      startBlock: 11820318
+      startBlock: 26105299
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -512,9 +511,9 @@ dataSources:
     name: DefaultReverseRegistrar
     network: mainnet
     source:
-      address: "0x4F382928805ba0e23B30cFB75fC9E848e82DFD47"
+      address: "0x283F227c4Bd38ecE252C4Ae7ECE650B0e913f1f9"
       abi: DefaultReverseRegistrar
-      startBlock: 8579966
+      startBlock: 22764819
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

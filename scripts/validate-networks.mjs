@@ -181,31 +181,34 @@ const CONSTANTS_TO_DEPLOYMENT = {
   ],
 };
 
-// Extract Address.fromString("0x...") literals from one exported function.
-function extractAddressLiterals(tsText, functionName) {
+// Extract Address.fromString("0x...") literals from one network branch of
+// an exported function.
+function extractAddressLiterals(tsText, functionName, network) {
   const startMarker = `export function ${functionName}(`;
   const startIdx = tsText.indexOf(startMarker);
   if (startIdx === -1) return null;
   const nextExportIdx = tsText.indexOf("export function ", startIdx + startMarker.length);
   const body = tsText.slice(startIdx, nextExportIdx === -1 ? undefined : nextExportIdx);
-  const matches = [...body.matchAll(/Address\.fromString\(\s*"(0x[0-9a-fA-F]+)"\s*\)/g)];
+  const branchMarker = `if (network == "${network}") {`;
+  const branchStart = body.indexOf(branchMarker);
+  if (branchStart === -1) return [];
+  const nextBranch = body.indexOf("\n  if (network ==", branchStart + branchMarker.length);
+  const branch = body.slice(branchStart, nextBranch === -1 ? undefined : nextBranch);
+  const matches = [...branch.matchAll(/Address\.fromString\(\s*"(0x[0-9a-fA-F]+)"\s*\)/g)];
   return matches.map((m) => m[1].toLowerCase());
 }
 
-function checkEnsv2ConstantsVsContractsV2() {
+function checkEnsv2ConstantsVsContractsV2(requestedNetwork) {
+  // Preserve the historical no-argument behavior, which checked Sepolia.
+  const validationNetwork = requestedNetwork || "sepolia";
   const deploymentsDir = join(
     parentDir,
     "contracts-v2",
     "contracts",
     "deployments",
-    "sepolia"
+    validationNetwork
   );
-  if (!existsSync(deploymentsDir)) {
-    console.log(
-      "[2/2] src/ensv2Constants.ts vs contracts-v2: SKIPPED (contracts-v2 submodule not checked out at ../contracts-v2 — expected for a standalone ens-subgraph clone; not a failure)."
-    );
-    return [];
-  }
+  const hasDeploymentArtifacts = existsSync(deploymentsDir);
 
   const constantsText = readFileSync(
     join(repoRoot, "src", "ensv2Constants.ts"),
@@ -217,7 +220,11 @@ function checkEnsv2ConstantsVsContractsV2() {
   for (const [functionName, deploymentFiles] of Object.entries(
     CONSTANTS_TO_DEPLOYMENT
   )) {
-    const literals = extractAddressLiterals(constantsText, functionName);
+    const literals = extractAddressLiterals(
+      constantsText,
+      functionName,
+      validationNetwork
+    );
     if (literals === null) {
       problems.push(
         `${functionName}: expected to find this function in src/ensv2Constants.ts, but it's gone — this check's CONSTANTS_TO_DEPLOYMENT mapping is now stale and needs updating alongside whatever renamed/removed it.`
@@ -230,6 +237,12 @@ function checkEnsv2ConstantsVsContractsV2() {
       );
       continue;
     }
+
+    // A standalone clone, or a network without checked-out deployment
+    // artifacts (currently mainnet), can still validate that the requested
+    // network branch is present and complete. Address equality is checked
+    // when matching contracts-v2 artifacts are available.
+    if (!hasDeploymentArtifacts) continue;
 
     for (let i = 0; i < deploymentFiles.length; i++) {
       const deploymentPath = join(deploymentsDir, deploymentFiles[i]);
@@ -250,14 +263,14 @@ function checkEnsv2ConstantsVsContractsV2() {
       }
       if (realAddress !== literals[i]) {
         problems.push(
-          `${functionName}: src/ensv2Constants.ts hardcodes ${literals[i]}, but contracts-v2/contracts/deployments/sepolia/${deploymentFiles[i]} (the currently-checked-out commit) says ${realAddress}. Either ensv2Constants.ts is stale and needs updating, or contracts-v2 has moved ahead of what this subgraph has synced to — check which before assuming.`
+          `${functionName}: src/ensv2Constants.ts hardcodes ${literals[i]}, but contracts-v2/contracts/deployments/${validationNetwork}/${deploymentFiles[i]} (the currently-checked-out commit) says ${realAddress}. Either ensv2Constants.ts is stale and needs updating, or contracts-v2 has moved ahead of what this subgraph has synced to — check which before assuming.`
         );
       }
     }
   }
 
   console.log(
-    `[2/2] src/ensv2Constants.ts vs contracts-v2: ${checkedCount} address(es) checked.`
+    `[2/2] src/ensv2Constants.ts (${validationNetwork}): ${checkedCount} address(es) checked${hasDeploymentArtifacts ? "." : "; contracts-v2 deployment artifacts unavailable, branch shape checked only."}`
   );
   return problems;
 }
@@ -274,7 +287,7 @@ function main() {
     ...(requestedNetwork
       ? checkRequestedNetwork(requestedNetwork)
       : checkSubgraphYamlVsNetworksJson()),
-    ...checkEnsv2ConstantsVsContractsV2(),
+    ...checkEnsv2ConstantsVsContractsV2(requestedNetwork),
   ];
 
   if (problems.length > 0) {

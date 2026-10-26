@@ -18,7 +18,8 @@
     "build": "graph build",
     "build:sepolia": "node scripts/run-network-command.mjs build sepolia",
     "deploy:sepolia": "node scripts/run-network-command.mjs deploy sepolia",
-    "deploy:holesky": "graph deploy ensholesky --network holesky --node https://api.studio.thegraph.com/deploy/",
+    "build:mainnet": "node scripts/run-network-command.mjs build mainnet",
+    "deploy:mainnet": "node scripts/run-network-command.mjs deploy mainnet",
     "watch-local": "graph deploy graphprotocol/ens --watch --debug --node http://127.0.0.1:8020/ --ipfs http://localhost:5001"
   },
   "devDependencies": {
