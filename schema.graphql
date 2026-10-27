@@ -276,11 +276,11 @@ type Account @entity(immutable: false) {
   wrappedDomains: [WrappedDomain!] @derivedFrom(field: "owner")
   "The Registrations made by the account"
   registrations: [Registration!] @derivedFrom(field: "registrant")
-}
-
-extend type Account {
+  "The ENSv2 name slots currently owned by the account"
   ensv2Slots: [ENSv2NameSlot!]! @derivedFrom(field: "owner")
+  "The ENSv2 tokens currently owned by the account"
   ensv2Tokens: [ENSv2Token!]! @derivedFrom(field: "owner")
+  "The ENSv2 registrations currently owned by the account"
   ensv2Registrations: [ENSv2Registration!]! @derivedFrom(field: "owner")
 }
 
