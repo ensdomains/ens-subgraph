@@ -15,8 +15,8 @@ import {
   ENSv2RegistryNamespaceIndex,
 } from "./types/schema";
 
-// 2^32, used to zero the lower 32 bits of a BigInt without needing
-// BigInt.bitAnd/bitXor (not available in the installed graph-ts 0.31.0).
+// 2^32, used to zero the lower 32 bits of a BigInt without relying on
+// bitwise helpers that are not part of the mapping runtime API.
 const TWO_POW_32 = BigInt.fromI64(4294967296);
 
 export function nameSlotId(registry: Bytes, slotId: BigInt): Bytes {

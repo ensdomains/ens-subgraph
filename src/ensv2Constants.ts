@@ -59,10 +59,10 @@ export function getV2GracePeriod(): BigInt {
   return BigInt.zero();
 }
 
-// graph-ts 0.31.0's `dataSource` host API has no `.name()` (only
-// address()/network()/context()), so RootRegistry/ETHRegistry can't be told
-// apart from a template-discovered registry by data source name — compare
-// event.address against these instead. Values are network-specific.
+// The mapping runtime does not expose a data-source name through the
+// `dataSource` host API, so RootRegistry/ETHRegistry can't be told apart from
+// a template-discovered registry by data-source name — compare event.address
+// against these instead. Values are network-specific.
 export function getRootRegistryAddress(): Address {
   let network = dataSource.network();
   if (network == "mainnet") {

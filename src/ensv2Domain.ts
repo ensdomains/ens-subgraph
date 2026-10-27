@@ -66,8 +66,11 @@ export function getEthDomainId(slot: ENSv2NameSlot): string | null {
     let pathId = pathNamehash(namespace.baseNamehash, slot.labelhash);
     let path = ENSv2NamePath.load(pathId);
     // Nullable Bytes require a truthy check before dereferencing.
-    if (path != null && path.domain) {
-      return path.domain!;
+    if (path != null) {
+      let domainId = path.domain;
+      if (domainId) {
+        return domainId;
+      }
     }
   }
   return null;
@@ -141,6 +144,57 @@ export function updateEthDomainOwner(
   }
 }
 
+// Link a projected Domain to its projected parent when one exists. Root
+// Registry paths deliberately have no legacy Domain projection, so a child
+// such as foo.eth must fall back to the existing ENSv1 Domain("eth") row.
+// The fallback is conditional: never create a legacy parent just to support
+// a bounded ENSv2 projection.
+function linkProjectedDomainToParent(
+  domain: Domain,
+  path: ENSv2NamePath,
+  isNewDomain: boolean
+): void {
+  let parentPathId = path.parent;
+  if (!parentPathId) {
+    return;
+  }
+
+  let parentPath = ENSv2NamePath.load(parentPathId);
+  if (parentPath == null) {
+    return;
+  }
+
+  let projectedParentId = parentPath.domain;
+  if (projectedParentId) {
+    domain.parent = projectedParentId;
+
+    // A Domain row created by an ENSv1 handler has already been counted by
+    // that handler. Only a newly-created compatibility row contributes a new
+    // direct child, and therefore increments the parent's count.
+    if (isNewDomain) {
+      let parentDomain = Domain.load(projectedParentId);
+      if (parentDomain != null) {
+        parentDomain.subdomainCount = parentDomain.subdomainCount + 1;
+        parentDomain.save();
+      }
+    }
+    return;
+  }
+
+  // RootRegistry paths are native-only, but their namehash IDs are the same
+  // IDs used by the legacy root-label Domain rows (eth, reverse).
+  let legacyParent = Domain.load(parentPath.id.toHexString());
+  if (legacyParent == null) {
+    return;
+  }
+
+  domain.parent = legacyParent.id;
+  if (isNewDomain) {
+    legacyParent.subdomainCount = legacyParent.subdomainCount + 1;
+    legacyParent.save();
+  }
+}
+
 function syncEthRegistration(
   slot: ENSv2NameSlot,
   path: ENSv2NamePath,
@@ -181,7 +235,7 @@ export function projectPathToDomain(
   isV1Migration: boolean
 ): void {
   let ownerId = slot.owner;
-  if (!ownerId) {
+  if (ownerId == null) {
     // handleLabelRegistered sets slot.owner before this projection.
     log.warning(
       "projectPathToDomain: slot {} has no owner, skipping projection",
@@ -205,8 +259,8 @@ export function projectPathToDomain(
   domain.labelhash = path.labelhash;
   // Preserve the V1 owner on existing migrated rows. A new compatibility row
   // has no legacy value to preserve and needs its required owner initialized.
-  if (!isV1Migration || isNewDomain) {
-    domain.owner = ownerId!;
+  if ((!isV1Migration || isNewDomain) && ownerId) {
+    domain.owner = ownerId;
   }
   // Migrated names: registrant correction is correctMigratedLegacyOwner's
   // job below (branch-aware), not this generic assignment.
@@ -218,13 +272,7 @@ export function projectPathToDomain(
   }
   domain.isMigrated = true;
 
-  let parentPathId = path.parent;
-  if (parentPathId) {
-    let parentPath = ENSv2NamePath.load(parentPathId);
-    if (parentPath != null && parentPath.domain) {
-      domain.parent = parentPath.domain!;
-    }
-  }
+  linkProjectedDomainToParent(domain, path, isNewDomain);
 
   // v2GracePeriod is ETHRegistrar/ETHRenewerV1-specific policy — only
   // applied for real .eth registrations, where Domain.expiryDate has always
@@ -259,11 +307,11 @@ export function projectPathToDomain(
     // registrar, but keeping this reconciliation here makes fixtures and
     // replays with the opposite ordering converge to the same native row.
     syncRegistrationFromSlot(slot);
-    if (isV1Migration) {
+    if (isV1Migration && ownerId) {
       correctMigratedLegacyOwner(
         domain.id,
         slot.labelhash.toHexString(),
-        ownerId!,
+        ownerId,
         isCanonicalEthPath
       );
     }

@@ -11,7 +11,7 @@ schema:
 # after a per-data-source placement was rejected at `graph build` time).
 # Applies to every data source below, v1 and v2 alike — safe uniformly,
 # since pruning only discards superseded historical entity *versions*,
-# never current-state data (see docs/judgement-calls.md).
+# never current-state data.
 indexerHints:
   prune: auto
 dataSources:

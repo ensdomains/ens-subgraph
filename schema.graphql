@@ -481,13 +481,6 @@ enum ENSv2NameSlotStatus {
   REGISTERED
 }
 
-enum ENSv2ResolverResourceKind {
-  NAME
-  TEXT
-  DATA
-  ADDR
-}
-
 type ENSv2Registry @entity(immutable: false) {
   id: Bytes! # registry address
   address: Bytes!
@@ -820,46 +813,6 @@ type ENSv2Registration @entity(immutable: false) {
   registrationDate: BigInt!
   # Always set from the registration event on creation.
   expiryDate: BigInt!
-  transactionID: Bytes!
-  logIndex: BigInt!
-}
-
-# --- Deprecated draft PermissionedResolver surfaces ---
-# ENSv2ResolverAlias and ENSv2ResolverResource represented events that are not
-# present in the final Sepolia deployment. They remain in the schema for now
-# to avoid an unnecessary GraphQL removal, but no deployed-contract handler
-# writes them.
-
-# `ENSv2ResolverAlias` stores resolver level alias rules.
-# These rules affect effective resolution, but they do not mutate the legacy `Resolver` row for the source node.
-type ENSv2ResolverAlias @entity(immutable: false) {
-  id: Bytes! # resolver + namehash of fromName
-  resolver: ENSv2Resolver!
-  fromName: Bytes!
-  toName: Bytes
-  fromNode: Bytes!
-  toNode: Bytes
-  fromNameDecoded: String
-  toNameDecoded: String
-  active: Boolean!
-  blockNumber: BigInt!
-  transactionID: Bytes!
-  logIndex: BigInt!
-}
-
-type ENSv2ResolverResource @entity(immutable: false) {
-  id: Bytes! # resolver + resource + optional part type/key
-  resolver: ENSv2Resolver!
-  resource: BigInt! # resolver-side resource, not the same ID space as ENSv2Resource.resource
-  node: Bytes!
-  name: Bytes!
-  nameDecoded: String
-  kind: ENSv2ResolverResourceKind!
-  key: String
-  keyHash: Bytes
-  coinType: BigInt
-  active: Boolean!
-  blockNumber: BigInt!
   transactionID: Bytes!
   logIndex: BigInt!
 }

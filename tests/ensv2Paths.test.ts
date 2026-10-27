@@ -1180,6 +1180,21 @@ test("fresh .eth registration produces Domain + Registration sharing the legacy 
     ethLabelHash
   ).toHexString();
 
+  // RootRegistry's native eth path must remain separate from the existing
+  // ENSv1 Domain row, but projected .eth children should still use that row
+  // as their legacy parent.
+  let legacyEthOwner = Address.fromString(OWNER_2).toHexString();
+  let legacyEthRegistrant = Address.fromString(OWNER).toHexString();
+  let legacyEth = new Domain(ethPathId);
+  legacyEth.name = "eth";
+  legacyEth.owner = legacyEthOwner;
+  legacyEth.registrant = legacyEthRegistrant;
+  legacyEth.expiryDate = BigInt.fromI32(1234567890);
+  legacyEth.isMigrated = false;
+  legacyEth.subdomainCount = 7;
+  legacyEth.createdAt = BigInt.fromI32(1);
+  legacyEth.save();
+
   let labelHash = Bytes.fromI32(80);
   handleLabelRegistered(
     createLabelRegisteredEvent(
@@ -1202,6 +1217,26 @@ test("fresh .eth registration produces Domain + Registration sharing the legacy 
     "expiryDate",
     "2000000000"
   );
+  assert.fieldEquals("Domain", pathId, "parent", ethPathId);
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "8");
+  assert.fieldEquals("Domain", ethPathId, "owner", legacyEthOwner);
+  assert.fieldEquals("Domain", ethPathId, "registrant", legacyEthRegistrant);
+  assert.fieldEquals("Domain", ethPathId, "expiryDate", "1234567890");
+  assert.fieldEquals("Domain", ethPathId, "isMigrated", "false");
+
+  // Re-registration reuses the projected Domain row and must not count the
+  // same direct child again.
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ETH_REGISTRY,
+      slotToken(1),
+      labelHash,
+      "vitalik",
+      OWNER_2
+    )
+  );
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "8");
+
   // v2GracePeriod is 2,419,200s (28 days) per src/ensv2Constants.ts.
   assert.fieldEquals("Domain", pathId, "expiryDate", "2002419200");
 });
