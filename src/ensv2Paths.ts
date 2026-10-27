@@ -84,7 +84,7 @@ export function clearProjectedDomainResolversForSlot(
       continue;
     }
     let path = ENSv2NamePath.load(pathIndex.path);
-    if (path != null) {
+    if (path != null && path.domain != null) {
       clearDomainResolver(path.namehash);
     }
   }
@@ -413,7 +413,13 @@ export function materializePathsForSlot(
       path.save();
     }
 
-    projectPathToDomain(path, slot, event, isV1Migration);
+    // RootRegistry paths are native ENSv2 metadata for the root namespace,
+    // not compatibility projections. Their IDs are ordinary ENSv1 namehashes
+    // (for example, <eth> and <reverse>), so projecting them would overwrite
+    // the existing ENSv1 Domain rows for those nodes.
+    if (registry.kind != "ROOT") {
+      projectPathToDomain(path, slot, event, isV1Migration);
+    }
   }
 }
 

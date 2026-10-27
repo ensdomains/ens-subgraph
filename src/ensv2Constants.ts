@@ -10,7 +10,7 @@ export function getMigrationControllers(): Address[] {
   let network = dataSource.network();
   if (network == "mainnet") {
     return [
-      Address.fromString("0xc46bf3b6c7ebcffd4ecfc3b012a1726a2463694d"), // LockedMigrationController
+      Address.fromString("0x3cea18620883a69ed349b23328a3b6302598e51a"), // LockedMigrationController
       Address.fromString("0xab821ca676cf2e0790fa273526a165cfa86aeb64"), // UnlockedMigrationController
     ];
   }
@@ -62,8 +62,7 @@ export function getV2GracePeriod(): BigInt {
 // graph-ts 0.31.0's `dataSource` host API has no `.name()` (only
 // address()/network()/context()), so RootRegistry/ETHRegistry can't be told
 // apart from a template-discovered registry by data source name — compare
-// event.address against these instead. Network-branched for when real
-// mainnet ENSv2 addresses exist.
+// event.address against these instead. Values are network-specific.
 export function getRootRegistryAddress(): Address {
   let network = dataSource.network();
   if (network == "mainnet") {
@@ -97,12 +96,12 @@ export function getEthRegistryAddress(): Address {
 // Implementation (not proxy) addresses behind VerifiableFactory.ProxyDeployed
 // — the signal kindForAddress uses to classify a template-discovered
 // registry as USER/WRAPPER, and to tell a resolver deployment apart from a
-// registry one. Values come from the matching Sepolia deployment artifacts.
-// Address comparison is byte-level, so checksum casing has no effect.
+// registry one. Values are configured from the deployment artifacts for each
+// network. Address comparison is byte-level, so checksum casing has no effect.
 export function getUserRegistryImplAddress(): Address {
   let network = dataSource.network();
   if (network == "mainnet") {
-    return Address.fromString("0x75ff9adbcfce2469b097ac68f6ae650eae1351bb");
+    return Address.fromString("0xfaa23592aca10a6d8875b18ea86954e8eb6d8d72");
   }
   if (network == "sepolia") {
     return Address.fromString("0x9BD8a88719068D09ecee662f36C0E3856708366a");
@@ -117,7 +116,7 @@ export function getUserRegistryImplAddress(): Address {
 export function getWrapperRegistryImplAddress(): Address {
   let network = dataSource.network();
   if (network == "mainnet") {
-    return Address.fromString("0xcf3edb3f5501de63b57254d910b6782ee370039b");
+    return Address.fromString("0xe86a4ef4d7a210aaa1d6a9594fc7add7cd2cf888");
   }
   if (network == "sepolia") {
     return Address.fromString("0xBe768b63E5fBBFBB0Ae97E9064E0002dF8001880");

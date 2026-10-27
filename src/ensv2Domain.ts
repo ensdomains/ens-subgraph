@@ -1,11 +1,13 @@
-// Option B compatibility projection: every ENSv2NamePath materialised by
-// ensv2Paths.ts::materializePathsForSlot gets a legacy Domain row (this is
+// Option B compatibility projection: every non-root ENSv2NamePath materialised
+// by ensv2Paths.ts::materializePathsForSlot gets a legacy Domain row (this is
 // what lets existing ENSv1 consumers keep working unchanged for ENSv2-origin
 // names), and the canonical <label>.eth path additionally gets a legacy
-// Registration row. An ETHRegistry slot may be reachable through several
-// linked namespaces, but Registration.domain must remain the canonical .eth
-// Domain rather than whichever linked path was materialised last. Only ever
-// creates rows for names that never existed in ENSv1.
+// Registration row. RootRegistry paths are native ENSv2 metadata only because
+// their IDs collide with existing ENSv1 root-label Domain rows. An ETHRegistry
+// slot may be reachable through several linked namespaces, but
+// Registration.domain must remain the canonical .eth Domain rather than
+// whichever linked path was materialised last. Only ever creates rows for
+// names that never existed in ENSv1.
 //
 // For migrated names, domain.owner remains the ENSv1 registry-level owner,
 // since it reflects ENSv1 ENSRegistry-level

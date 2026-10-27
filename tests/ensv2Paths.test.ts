@@ -27,7 +27,12 @@ import {
 import { namespaceId, pathNamehash } from "../src/ensv2Utils";
 import { createResolverID, handleAddrChanged } from "../src/resolver";
 import { AddrChanged } from "../src/types/Resolver/Resolver";
-import { Domain, ENSv2NameSlot, Resolver } from "../src/types/schema";
+import {
+  Domain,
+  ENSv2NamePath,
+  ENSv2NameSlot,
+  Resolver,
+} from "../src/types/schema";
 import {
   ContenthashUpdated,
   Linked,
@@ -321,6 +326,119 @@ const createContenthashUpdatedEvent = (
 afterEach(() => {
   dataSourceMock.resetValues();
   clearStore();
+});
+
+test("RootRegistry paths do not create or mutate legacy eth/reverse Domain rows", () => {
+  dataSourceMock.setNetwork("sepolia");
+
+  let ethLabelHash = Bytes.fromByteArray(
+    crypto.keccak256(ByteArray.fromUTF8("eth"))
+  );
+  let reverseLabelHash = Bytes.fromByteArray(
+    crypto.keccak256(ByteArray.fromUTF8("reverse"))
+  );
+  let ethDomainId = pathNamehash(
+    Bytes.fromHexString(ROOT_NAMEHASH),
+    ethLabelHash
+  ).toHexString();
+  let reverseDomainId = pathNamehash(
+    Bytes.fromHexString(ROOT_NAMEHASH),
+    reverseLabelHash
+  ).toHexString();
+  let legacyOwner = Address.fromString(OWNER_2).toHexString();
+  let legacyRegistrant = Address.fromString(OWNER).toHexString();
+  let resolverAddress = Address.fromString(
+    "0x2222222222222222222222222222222222222222"
+  );
+  let resolverId = createResolverID(
+    Bytes.fromHexString(ethDomainId),
+    resolverAddress
+  );
+
+  let ethDomain = new Domain(ethDomainId);
+  ethDomain.name = "eth";
+  ethDomain.owner = legacyOwner;
+  ethDomain.registrant = legacyRegistrant;
+  ethDomain.resolver = resolverId;
+  ethDomain.expiryDate = BigInt.fromI32(1234567890);
+  ethDomain.isMigrated = false;
+  ethDomain.subdomainCount = 0;
+  ethDomain.createdAt = BigInt.fromI32(1);
+  ethDomain.save();
+
+  let resolver = new Resolver(resolverId);
+  resolver.domain = ethDomainId;
+  resolver.address = resolverAddress;
+  resolver.save();
+
+  let reverseDomain = new Domain(reverseDomainId);
+  reverseDomain.name = "reverse";
+  reverseDomain.owner = legacyOwner;
+  reverseDomain.registrant = legacyRegistrant;
+  reverseDomain.expiryDate = BigInt.fromI32(1234567891);
+  reverseDomain.isMigrated = false;
+  reverseDomain.subdomainCount = 0;
+  reverseDomain.createdAt = BigInt.fromI32(1);
+  reverseDomain.save();
+
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(1),
+      ethLabelHash,
+      "eth",
+      OWNER
+    )
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(2),
+      reverseLabelHash,
+      "reverse",
+      OWNER
+    )
+  );
+
+  assert.fieldEquals("Domain", ethDomainId, "owner", legacyOwner);
+  assert.fieldEquals("Domain", ethDomainId, "registrant", legacyRegistrant);
+  assert.fieldEquals("Domain", ethDomainId, "expiryDate", "1234567890");
+  assert.fieldEquals("Domain", ethDomainId, "isMigrated", "false");
+  assert.fieldEquals("Domain", ethDomainId, "resolver", resolverId);
+  assert.fieldEquals("Domain", reverseDomainId, "owner", legacyOwner);
+  assert.fieldEquals(
+    "Domain",
+    reverseDomainId,
+    "registrant",
+    legacyRegistrant
+  );
+  assert.fieldEquals("Domain", reverseDomainId, "expiryDate", "1234567891");
+  assert.fieldEquals("Domain", reverseDomainId, "isMigrated", "false");
+
+  let ethPath = ENSv2NamePath.load(Bytes.fromHexString(ethDomainId));
+  let reversePath = ENSv2NamePath.load(Bytes.fromHexString(reverseDomainId));
+  let ethPathHasDomain = false;
+  let reversePathHasDomain = false;
+  if (ethPath != null && ethPath.domain) {
+    ethPathHasDomain = true;
+  }
+  if (reversePath != null && reversePath.domain) {
+    reversePathHasDomain = true;
+  }
+  assert.assertTrue(!ethPathHasDomain);
+  assert.assertTrue(!reversePathHasDomain);
+
+  // A root-slot re-registration must not clear the legacy resolver either.
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(1),
+      ethLabelHash,
+      "eth",
+      OWNER
+    )
+  );
+  assert.fieldEquals("Domain", ethDomainId, "resolver", resolverId);
 });
 
 test("3-level nested registration produces correct name/namehash/depth chain", () => {
@@ -629,6 +747,7 @@ test("unregister -> re-register does not inflate pathCount", () => {
 test("handleResolverUpdated creates ENSv2Resolver and links/clears slot.resolver", () => {
   dataSourceMock.setNetwork("sepolia");
 
+  const CHILD_REGISTRY = "0x11111111111111111111111111111111111111bb";
   const RESOLVER_ADDRESS = "0x444444444444444444444444444444444444444d";
   const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -636,19 +755,30 @@ test("handleResolverUpdated creates ENSv2Resolver and links/clears slot.resolver
     createLabelRegisteredEvent(
       ROOT_REGISTRY,
       slotToken(1),
+      Bytes.fromI32(49),
+      "parent"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(1), CHILD_REGISTRY)
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      CHILD_REGISTRY,
+      slotToken(1),
       Bytes.fromI32(50),
       "res"
     )
   );
-  let slotId = slotIdFor(ROOT_REGISTRY, 1);
+  let slotId = slotIdFor(CHILD_REGISTRY, 1);
 
   handleResolverUpdated(
-    createResolverUpdatedEvent(ROOT_REGISTRY, slotToken(1), RESOLVER_ADDRESS)
+    createResolverUpdatedEvent(CHILD_REGISTRY, slotToken(1), RESOLVER_ADDRESS)
   );
 
   let resolverId = Address.fromString(RESOLVER_ADDRESS).toHexString();
   let pathNode = pathNamehash(
-    Bytes.fromHexString(ROOT_NAMEHASH),
+    pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), Bytes.fromI32(49)),
     Bytes.fromI32(50)
   );
   let legacyResolverId = createResolverID(
@@ -673,7 +803,7 @@ test("handleResolverUpdated creates ENSv2Resolver and links/clears slot.resolver
 
   // Clearing — slot is never deleted, only the resolver fields go null.
   handleResolverUpdated(
-    createResolverUpdatedEvent(ROOT_REGISTRY, slotToken(1), ZERO_ADDRESS)
+    createResolverUpdatedEvent(CHILD_REGISTRY, slotToken(1), ZERO_ADDRESS)
   );
   assert.assertTrue(slotExists(slotId));
   assert.assertTrue(!Domain.load(pathNode.toHexString())!.resolver);
@@ -682,6 +812,7 @@ test("handleResolverUpdated creates ENSv2Resolver and links/clears slot.resolver
 
 test("link and record update before registry association snapshot correctly, and stale resolver fanout is ignored after a change", () => {
   dataSourceMock.setNetwork("sepolia");
+  const CHILD_REGISTRY = "0x33333333333333333333333333333333333333bb";
   const RESOLVER_A = "0x4646464646464646464646464646464646464646";
   const RESOLVER_B = "0x4747474747474747474747474747474747474747";
   let tokenId = slotToken(1);
@@ -693,11 +824,25 @@ test("link and record update before registry association snapshot correctly, and
     createLabelRegisteredEvent(
       ROOT_REGISTRY,
       tokenId,
+      Bytes.fromI32(51),
+      "parent"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, tokenId, CHILD_REGISTRY)
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      CHILD_REGISTRY,
+      tokenId,
       labelHash,
       "ordered"
     )
   );
-  let node = pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), labelHash);
+  let node = pathNamehash(
+    pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), Bytes.fromI32(51)),
+    labelHash
+  );
   let resolverAId = createResolverID(node, Address.fromString(RESOLVER_A));
   let resolverBId = createResolverID(node, Address.fromString(RESOLVER_B));
 
@@ -718,7 +863,7 @@ test("link and record update before registry association snapshot correctly, and
   // The registry association arrives last and must snapshot the already
   // populated native record immediately.
   handleResolverUpdated(
-    createResolverUpdatedEvent(ROOT_REGISTRY, tokenId, RESOLVER_A)
+    createResolverUpdatedEvent(CHILD_REGISTRY, tokenId, RESOLVER_A)
   );
   assert.fieldEquals("Domain", node.toHexString(), "resolver", resolverAId);
   assert.bytesEquals(initialContent, Resolver.load(resolverAId)!.contentHash!);
@@ -726,7 +871,7 @@ test("link and record update before registry association snapshot correctly, and
   // Once the registry switches to B, later updates from A remain native-only
   // and cannot mutate either Domain.resolver or B's legacy snapshot.
   handleResolverUpdated(
-    createResolverUpdatedEvent(ROOT_REGISTRY, tokenId, RESOLVER_B)
+    createResolverUpdatedEvent(CHILD_REGISTRY, tokenId, RESOLVER_B)
   );
   let staleContent = Bytes.fromUTF8("stale-resolver-update");
   handleContenthashUpdated(
@@ -748,6 +893,7 @@ test("link and record update before registry association snapshot correctly, and
 
 test("a classic PublicResolverV2 event updates the Resolver row attached by ENSv2 ResolverUpdated", () => {
   dataSourceMock.setNetwork("sepolia");
+  const CHILD_REGISTRY = "0x55555555555555555555555555555555555555bb";
   const RESOLVER_ADDRESS = "0x4545454545454545454545454545454545454545";
   const RESOLVED_ADDRESS = "0x5656565656565656565656565656565656565656";
 
@@ -755,16 +901,27 @@ test("a classic PublicResolverV2 event updates the Resolver row attached by ENSv
     createLabelRegisteredEvent(
       ROOT_REGISTRY,
       slotToken(1),
+      Bytes.fromI32(50),
+      "parent"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(1), CHILD_REGISTRY)
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      CHILD_REGISTRY,
+      slotToken(1),
       Bytes.fromI32(51),
       "classic"
     )
   );
   let node = pathNamehash(
-    Bytes.fromHexString(ROOT_NAMEHASH),
+    pathNamehash(Bytes.fromHexString(ROOT_NAMEHASH), Bytes.fromI32(50)),
     Bytes.fromI32(51)
   );
   handleResolverUpdated(
-    createResolverUpdatedEvent(ROOT_REGISTRY, slotToken(1), RESOLVER_ADDRESS)
+    createResolverUpdatedEvent(CHILD_REGISTRY, slotToken(1), RESOLVER_ADDRESS)
   );
 
   let mockEvent = newMockEvent();
@@ -950,7 +1107,7 @@ test("deactivating a namespace deactivates every materialised path, not just the
   assert.fieldEquals("ENSv2NamePath", leafTwoPathId, "active", "false");
 });
 
-test("fresh non-.eth registration produces a queryable Domain row with correct parent chain", () => {
+test("fresh non-.eth registration projects a Domain while its root parent stays native-only", () => {
   dataSourceMock.setNetwork("sepolia");
 
   const CHILD_REGISTRY = "0x666666666666666666666666666666666666666f";
@@ -967,13 +1124,8 @@ test("fresh non-.eth registration produces a queryable Domain row with correct p
     Bytes.fromHexString(ROOT_NAMEHASH),
     Bytes.fromI32(70)
   ).toHexString();
-  assert.fieldEquals("Domain", alphaPathId, "name", "alpha");
-  assert.fieldEquals(
-    "Domain",
-    alphaPathId,
-    "owner",
-    Address.fromString(OWNER).toHexString()
-  );
+  assert.fieldEquals("ENSv2NamePath", alphaPathId, "name", "alpha");
+  assert.notInStore("Domain", alphaPathId);
 
   handleSubregistryUpdated(
     createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(1), CHILD_REGISTRY)
@@ -992,10 +1144,15 @@ test("fresh non-.eth registration produces a queryable Domain row with correct p
   ).toHexString();
 
   assert.fieldEquals("Domain", betaPathId, "name", "beta.alpha");
-  assert.fieldEquals("Domain", betaPathId, "parent", alphaPathId);
   // Non-.eth: no legacy Registration row, and no grace-period addition —
   // Domain.expiryDate is the slot's raw expiry.
   assert.fieldEquals("Domain", betaPathId, "expiryDate", "2000000000");
+  let betaDomain = Domain.load(betaPathId);
+  let hasParent = false;
+  if (betaDomain != null && betaDomain.parent) {
+    hasParent = true;
+  }
+  assert.assertTrue(!hasParent);
   assert.notInStore("Registration", Bytes.fromI32(71).toHexString());
 });
 
@@ -1199,7 +1356,7 @@ test("late-linked path has no Domain row", () => {
   );
 });
 
-test("re-registration updates the existing Domain owner and performs the silent resolver reset", () => {
+test("RootRegistry re-registration reactivates the native path without a legacy Domain", () => {
   dataSourceMock.setNetwork("sepolia");
 
   handleLabelRegistered(
@@ -1215,23 +1372,18 @@ test("re-registration updates the existing Domain owner and performs the silent 
     Bytes.fromHexString(ROOT_NAMEHASH),
     Bytes.fromI32(100)
   ).toHexString();
-  assert.fieldEquals(
-    "Domain",
-    pathId,
-    "owner",
-    Address.fromString(OWNER).toHexString()
-  );
+  assert.notInStore("Domain", pathId);
 
   const RESOLVER_ADDRESS = "0x888888888888888888888888888888888888888b";
   handleResolverUpdated(
     createResolverUpdatedEvent(ROOT_REGISTRY, slotToken(1), RESOLVER_ADDRESS)
   );
-  assert.assertTrue(!!Domain.load(pathId)!.resolver);
+  assert.notInStore("Domain", pathId);
 
   handleLabelUnregistered(
     createLabelUnregisteredEvent(ROOT_REGISTRY, slotToken(1))
   );
-  assert.assertTrue(!!Domain.load(pathId)!.resolver);
+  assert.notInStore("Domain", pathId);
   handleLabelRegistered(
     createLabelRegisteredEvent(
       ROOT_REGISTRY,
@@ -1242,13 +1394,7 @@ test("re-registration updates the existing Domain owner and performs the silent 
     )
   );
 
-  assert.fieldEquals(
-    "Domain",
-    pathId,
-    "owner",
-    Address.fromString(OWNER_2).toHexString()
-  );
-  assert.assertTrue(!Domain.load(pathId)!.resolver);
-  assert.assertTrue(!Domain.load(pathId)!.resolvedAddress);
+  assert.notInStore("Domain", pathId);
+  assert.fieldEquals("ENSv2NamePath", pathId, "active", "true");
   assert.entityCount("ENSv2NamePath", 1);
 });

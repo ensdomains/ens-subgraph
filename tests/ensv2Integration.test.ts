@@ -536,7 +536,7 @@ test("late-link + Domain projection combined: pre-existing child registration st
   assert.fieldEquals("ENSv2NameSlot", preexistingSlotId, "pathCount", "0");
 
   // A fresh registration in the same child registry, after the link, is
-  // fully projected with the correct parent chain.
+  // projected into Domain; its RootRegistry parent remains native-only.
   let freshLabelHash = Bytes.fromI32(92);
   handleLabelRegistered(
     createLabelRegisteredEvent(
@@ -548,7 +548,13 @@ test("late-link + Domain projection combined: pre-existing child registration st
   );
   let freshPathId = pathNamehash(baseNamehash, freshLabelHash).toHexString();
   assert.fieldEquals("Domain", freshPathId, "name", "freshpostlink.latebase");
-  assert.fieldEquals("Domain", freshPathId, "parent", basePathId);
+  assert.notInStore("Domain", basePathId);
+  let freshDomain = Domain.load(freshPathId);
+  let hasParent = false;
+  if (freshDomain != null && freshDomain.parent) {
+    hasParent = true;
+  }
+  assert.assertTrue(!hasParent);
 });
 
 test("migration correction survives unrelated cross-file activity in the same store", () => {

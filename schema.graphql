@@ -459,9 +459,11 @@ type VersionChanged implements ResolverEvent @entity(immutable: true) {
 # ---------------------------------------------------------------------------
 # ENSv2 native and compatibility entities.
 # ENSv2-native entities are the source of truth for registries, namespaces,
-# slots, tokens, resources, and linked paths. Domain (above) and
-# ENSv2NamePath are bounded compatibility projections and do not backfill
-# registrations that predate a namespace link.
+# slots, tokens, resources, and linked paths. Domain (above) and eligible
+# ENSv2NamePath rows are bounded compatibility projections and do not backfill
+# registrations that predate a namespace link. RootRegistry paths are
+# materialized natively but remain unprojected because root-label namehashes
+# can collide with existing ENSv1 TLD Domain rows.
 # ---------------------------------------------------------------------------
 
 enum ENSv2RegistryKind {
@@ -624,7 +626,7 @@ type ENSv2NamePath @entity(immutable: false) {
   name: String
   namehash: Bytes!
   depth: Int!
-  domain: Domain # compatibility projection, nullable by design
+  domain: Domain # compatibility projection; nullable for late-linked and root paths
   active: Boolean!
   namespaceCount: Int! # needed to enumerate ENSv2PathNamespaceIndex
   createdAt: BigInt!
