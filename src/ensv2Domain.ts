@@ -195,6 +195,39 @@ function linkProjectedDomainToParent(
   }
 }
 
+// ENSv1 only counts a child in Domain.subdomainCount while it is live
+// (recurseDomainDelete decrements when the registry owner is cleared). The
+// ENSv2 analogue of that liveness is the projected path's `active` flag, so
+// callers invoke this on an active-flag transition: -1 when a projected path
+// is deactivated (LabelUnregistered, namespace unlink), +1 when a previously
+// deactivated path is reactivated by a re-registration. Creation is counted
+// separately by linkProjectedDomainToParent. Root paths and late-linked paths
+// have no Domain projection and are ignored.
+export function adjustParentSubdomainCount(
+  path: ENSv2NamePath,
+  delta: i32
+): void {
+  let domainId = path.domain;
+  if (domainId == null) {
+    return;
+  }
+  let domain = Domain.load(domainId!);
+  if (domain == null) {
+    return;
+  }
+  let parentId = domain.parent;
+  if (parentId == null) {
+    return;
+  }
+  let parent = Domain.load(parentId!);
+  if (parent == null) {
+    return;
+  }
+  let next = parent.subdomainCount + delta;
+  parent.subdomainCount = next < 0 ? 0 : next;
+  parent.save();
+}
+
 function syncEthRegistration(
   slot: ENSv2NameSlot,
   path: ENSv2NamePath,

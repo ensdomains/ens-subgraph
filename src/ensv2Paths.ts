@@ -37,7 +37,10 @@ import {
   attachDomainResolver,
   clearDomainResolver,
 } from "./ensv2ResolverProjection";
-import { projectPathToDomain } from "./ensv2Domain";
+import {
+  adjustParentSubdomainCount,
+  projectPathToDomain,
+} from "./ensv2Domain";
 import {
   ENSv2NamePath,
   ENSv2Namespace,
@@ -278,6 +281,9 @@ function deactivatePathsForNamespace(
     if (path == null) {
       continue;
     }
+    if (path.active) {
+      adjustParentSubdomainCount(path, -1);
+    }
     path.active = false;
     path.updatedAt = block.timestamp;
     path.updatedAtBlock = block.number;
@@ -407,6 +413,13 @@ export function materializePathsForSlot(
       appendSlotPathIndex(slot, path);
       appendNamespacePathIndex(namespace, path);
     } else {
+      // Reactivation of a path deactivated by LabelUnregistered or a
+      // namespace unlink: the projected Domain row (if any) is reused below
+      // with isNewDomain=false, so the parent's subdomainCount is restored
+      // here, before projection, on the inactive -> active transition only.
+      if (!path.active) {
+        adjustParentSubdomainCount(path, 1);
+      }
       path.active = true;
       path.updatedAt = event.block.timestamp;
       path.updatedAtBlock = event.block.number;

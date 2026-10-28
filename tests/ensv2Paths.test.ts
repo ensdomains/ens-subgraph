@@ -1433,3 +1433,76 @@ test("RootRegistry re-registration reactivates the native path without a legacy 
   assert.fieldEquals("ENSv2NamePath", pathId, "active", "true");
   assert.entityCount("ENSv2NamePath", 1);
 });
+
+test("unregister decrements and re-registration restores the legacy parent's subdomainCount, without double counting", () => {
+  dataSourceMock.setNetwork("sepolia");
+
+  let ethLabelHash = Bytes.fromByteArray(
+    crypto.keccak256(ByteArray.fromUTF8("eth"))
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ROOT_REGISTRY,
+      slotToken(1),
+      ethLabelHash,
+      "eth"
+    )
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(1), ETH_REGISTRY)
+  );
+  let ethPathId = pathNamehash(
+    Bytes.fromHexString(ROOT_NAMEHASH),
+    ethLabelHash
+  ).toHexString();
+
+  let legacyEth = new Domain(ethPathId);
+  legacyEth.name = "eth";
+  legacyEth.owner = Address.fromString(OWNER_2).toHexString();
+  legacyEth.isMigrated = false;
+  legacyEth.subdomainCount = 3;
+  legacyEth.createdAt = BigInt.fromI32(1);
+  legacyEth.save();
+
+  let labelHash = Bytes.fromI32(81);
+  let pathId = pathNamehash(Bytes.fromHexString(ethPathId), labelHash).toHexString();
+
+  // Fresh registration: new projected Domain counts once.
+  handleLabelRegistered(
+    createLabelRegisteredEvent(ETH_REGISTRY, slotToken(1), labelHash, "cycle")
+  );
+  assert.fieldEquals("Domain", pathId, "parent", ethPathId);
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "4");
+
+  // Unregister: the child is no longer live, so it stops counting.
+  handleLabelUnregistered(
+    createLabelUnregisteredEvent(ETH_REGISTRY, slotToken(1))
+  );
+  assert.fieldEquals("ENSv2NamePath", pathId, "active", "false");
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "3");
+
+  // A second unregister of the same (already inactive) slot is a no-op.
+  handleLabelUnregistered(
+    createLabelUnregisteredEvent(ETH_REGISTRY, slotToken(1))
+  );
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "3");
+
+  // Re-registration reuses the Domain row and restores the count exactly once.
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ETH_REGISTRY,
+      slotToken(1),
+      labelHash,
+      "cycle",
+      OWNER_2
+    )
+  );
+  assert.fieldEquals("ENSv2NamePath", pathId, "active", "true");
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "4");
+
+  // Root-level unregister (no projected Domain) never touches any count.
+  handleLabelUnregistered(
+    createLabelUnregisteredEvent(ROOT_REGISTRY, slotToken(1))
+  );
+  assert.fieldEquals("Domain", ethPathId, "subdomainCount", "4");
+});

@@ -33,6 +33,7 @@ import {
 import {
   correctMigratedLegacyOwner,
   getEthDomainId,
+  adjustParentSubdomainCount,
   updateEthDomainOwner,
 } from "./ensv2Domain";
 import { processEACRolesChanged } from "./ensv2Roles";
@@ -282,6 +283,12 @@ export function handleLabelUnregistered(event: LabelUnregistered): void {
     let path = ENSv2NamePath.load(pathIndex.path);
     if (path == null) {
       continue;
+    }
+    // Mirror ENSv1: a child stops counting towards its parent's
+    // subdomainCount when it is no longer live. Transition-guarded so a
+    // repeated unregister cannot double-decrement.
+    if (path.active) {
+      adjustParentSubdomainCount(path, -1);
     }
     path.active = false;
     path.updatedAt = event.block.timestamp;
