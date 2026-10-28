@@ -5,7 +5,9 @@ on: [push]
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04 (Oct 2026) and graph-cli has no
+    # matchstick binary for it ("Unsupported platform: Linux x64 26").
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v3
 
