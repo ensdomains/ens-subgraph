@@ -132,7 +132,7 @@ const createNameRegisteredEvent = (
 };
 
 const createTestEthDomain = (owner: string): void => {
-  handleNewOwner(createNewOwnerEvent(ETH_NODE, TEST_LABELHASH, owner));
+  handleNewOwner(createNewOwnerEvent(ETH_NODE.toHexString(), TEST_LABELHASH, owner));
 };
 
 describe("wrapped name re-registration", () => {

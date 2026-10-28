@@ -2,13 +2,21 @@
 import { BigInt, ByteArray, Bytes, store } from "@graphprotocol/graph-ts";
 // Import event types from the registry contract ABI
 import {
+  ApprovalForAll as ApprovalForAllEvent,
+  ControllerChanged as ControllerChangedEvent,
   ExpiryExtended as ExpiryExtendedEvent,
   FusesSet as FusesSetEvent,
   NameUnwrapped as NameUnwrappedEvent,
   NameWrapped as NameWrappedEvent,
+  OwnershipTransferred as OwnershipTransferredEvent,
   TransferBatch as TransferBatchEvent,
   TransferSingle as TransferSingleEvent,
 } from "./types/NameWrapper/NameWrapper";
+import {
+  processApprovalForAll,
+  processControllerStatus,
+  processOwnershipTransferred,
+} from "./accessControl";
 // Import entity types generated from the GraphQL schema
 import {
   ExpiryExtended,
@@ -21,13 +29,14 @@ import {
 import {
   checkValidLabel,
   concat,
-  createEventID,
+  createLegacyEventID,
   createOrLoadAccount,
   createOrLoadDomain,
   ETH_NODE,
+  uint256ToByteArray,
 } from "./utils";
 
-function decodeName(buf: Bytes): Array<string> | null {
+export function decodeName(buf: Bytes): Array<string> | null {
   let offset = 0;
   let list = new ByteArray(0);
   let dot = Bytes.fromHexString("2e");
@@ -77,8 +86,8 @@ export function handleNameWrapped(event: NameWrappedEvent): void {
   let fuses = event.params.fuses.toI32();
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
-  let owner = createOrLoadAccount(event.params.owner.toHex());
-  let domain = createOrLoadDomain(node.toHex());
+  let owner = createOrLoadAccount(event.params.owner);
+  let domain = createOrLoadDomain(node);
 
   if (!domain.labelName && label) {
     domain.labelName = label;
@@ -93,7 +102,7 @@ export function handleNameWrapped(event: NameWrappedEvent): void {
   domain.wrappedOwner = owner.id;
   domain.save();
 
-  let wrappedDomain = new WrappedDomain(node.toHex());
+  let wrappedDomain = new WrappedDomain(node.toHexString());
   wrappedDomain.domain = domain.id;
   wrappedDomain.expiryDate = expiryDate;
   wrappedDomain.fuses = fuses;
@@ -101,7 +110,7 @@ export function handleNameWrapped(event: NameWrappedEvent): void {
   wrappedDomain.name = name;
   wrappedDomain.save();
 
-  let nameWrappedEvent = new NameWrapped(createEventID(event));
+  let nameWrappedEvent = new NameWrapped(createLegacyEventID(event));
   nameWrappedEvent.domain = domain.id;
   nameWrappedEvent.name = name;
   nameWrappedEvent.fuses = fuses;
@@ -116,23 +125,31 @@ export function handleNameUnwrapped(event: NameUnwrappedEvent): void {
   let node = event.params.node;
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
-  let owner = createOrLoadAccount(event.params.owner.toHex());
+  let owner = createOrLoadAccount(event.params.owner);
 
-  let domain = createOrLoadDomain(node.toHex());
+  let domain = createOrLoadDomain(node);
   domain.wrappedOwner = null;
-  if (domain.expiryDate && domain.parent != ETH_NODE) {
+  // Nullable-Bytes comparison against a real value (not null) hits the same
+  // compileBinaryOverload crash as comparing against null (AssemblyScript
+  // compiler gotcha) — isolate the .equals() call behind a
+  // truthy guard and assign the boolean to a local first, never inline.
+  let parentIsEth = false;
+  if (domain.parent) {
+    parentIsEth = domain.parent! == ETH_NODE.toHexString();
+  }
+  if (domain.expiryDate && !parentIsEth) {
     domain.expiryDate = null;
   }
   domain.save();
 
-  let nameUnwrappedEvent = new NameUnwrapped(createEventID(event));
-  nameUnwrappedEvent.domain = node.toHex();
+  let nameUnwrappedEvent = new NameUnwrapped(createLegacyEventID(event));
+  nameUnwrappedEvent.domain = node.toHexString();
   nameUnwrappedEvent.owner = owner.id;
   nameUnwrappedEvent.blockNumber = blockNumber;
   nameUnwrappedEvent.transactionID = transactionID;
   nameUnwrappedEvent.save();
 
-  store.remove("WrappedDomain", node.toHex());
+  store.remove("WrappedDomain", node.toHexString());
 }
 
 export function handleFusesSet(event: FusesSetEvent): void {
@@ -140,20 +157,20 @@ export function handleFusesSet(event: FusesSetEvent): void {
   let fuses = event.params.fuses;
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
-  let wrappedDomain = WrappedDomain.load(node.toHex());
+  let wrappedDomain = WrappedDomain.load(node.toHexString());
   if (wrappedDomain) {
     wrappedDomain.fuses = fuses.toI32();
     wrappedDomain.save();
     if (wrappedDomain.expiryDate && checkPccBurned(wrappedDomain.fuses)) {
-      let domain = createOrLoadDomain(node.toHex());
+      let domain = createOrLoadDomain(node);
       if (!domain.expiryDate || wrappedDomain.expiryDate > domain.expiryDate!) {
         domain.expiryDate = wrappedDomain.expiryDate;
         domain.save();
       }
     }
   }
-  let fusesBurnedEvent = new FusesSet(createEventID(event));
-  fusesBurnedEvent.domain = node.toHex();
+  let fusesBurnedEvent = new FusesSet(createLegacyEventID(event));
+  fusesBurnedEvent.domain = node.toHexString();
   fusesBurnedEvent.fuses = fuses.toI32();
   fusesBurnedEvent.blockNumber = blockNumber;
   fusesBurnedEvent.transactionID = transactionID;
@@ -165,20 +182,20 @@ export function handleExpiryExtended(event: ExpiryExtendedEvent): void {
   let expiry = event.params.expiry;
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
-  let wrappedDomain = WrappedDomain.load(node.toHex());
+  let wrappedDomain = WrappedDomain.load(node.toHexString());
   if (wrappedDomain) {
     wrappedDomain.expiryDate = expiry;
     wrappedDomain.save();
     if (checkPccBurned(wrappedDomain.fuses)) {
-      let domain = createOrLoadDomain(node.toHex());
+      let domain = createOrLoadDomain(node);
       if (!domain.expiryDate || expiry > domain.expiryDate!) {
         domain.expiryDate = expiry;
         domain.save();
       }
     }
   }
-  let expiryExtendedEvent = new ExpiryExtended(createEventID(event));
-  expiryExtendedEvent.domain = node.toHex();
+  let expiryExtendedEvent = new ExpiryExtended(createLegacyEventID(event));
+  expiryExtendedEvent.domain = node.toHexString();
   expiryExtendedEvent.expiryDate = expiry;
   expiryExtendedEvent.blockNumber = blockNumber;
   expiryExtendedEvent.transactionID = transactionID;
@@ -190,16 +207,19 @@ function makeWrappedTransfer(
   transactionID: Bytes,
   eventID: string,
   node: BigInt,
-  to: string
+  to: Bytes
 ): void {
   const _to = createOrLoadAccount(to);
-  const namehash = "0x" + node.toHex().slice(2).padStart(64, "0");
+  // Reuses uint256ToByteArray instead of the old manual
+  // "0x" + node.toHex().slice(2).padStart(64, "0") string surgery — same
+  // 32-byte big-endian value, no reimplementation.
+  const namehash = Bytes.fromByteArray(uint256ToByteArray(node));
   const domain = createOrLoadDomain(namehash);
-  let wrappedDomain = WrappedDomain.load(namehash);
+  let wrappedDomain = WrappedDomain.load(namehash.toHexString());
   // new registrations emit the Transfer` event before the NameWrapped event
   // so we need to create the WrappedDomain entity here
   if (wrappedDomain == null) {
-    wrappedDomain = new WrappedDomain(namehash);
+    wrappedDomain = new WrappedDomain(namehash.toHexString());
     wrappedDomain.domain = domain.id;
 
     // placeholders until we get the NameWrapped event
@@ -222,9 +242,9 @@ export function handleTransferSingle(event: TransferSingleEvent): void {
   makeWrappedTransfer(
     event.block.number.toI32(),
     event.transaction.hash,
-    createEventID(event).concat("-0"),
+    createLegacyEventID(event).concat("-0"),
     event.params.id,
-    event.params.to.toHex()
+    event.params.to
   );
 }
 
@@ -237,9 +257,38 @@ export function handleTransferBatch(event: TransferBatchEvent): void {
     makeWrappedTransfer(
       blockNumber,
       transactionID,
-      createEventID(event).concat("-").concat(i.toString()),
+      createLegacyEventID(event).concat("-").concat(i.toString()),
       ids[i],
-      to.toHex()
+      to
     );
   }
+}
+
+// NameWrapper's ApprovalForAll names the approving account `account`, not
+// `owner` (unlike ENSRegistry/BaseRegistrar) — see src/accessControl.ts.
+export function handleNameWrapperApprovalForAll(
+  event: ApprovalForAllEvent
+): void {
+  processApprovalForAll(
+    event.address,
+    event.params.account,
+    event.params.operator,
+    event.params.approved,
+    event.block
+  );
+}
+
+export function handleNameWrapperOwnershipTransferred(
+  event: OwnershipTransferredEvent
+): void {
+  processOwnershipTransferred(event.address, event.params.newOwner, event.block);
+}
+
+export function handleControllerChanged(event: ControllerChangedEvent): void {
+  processControllerStatus(
+    event.address,
+    event.params.controller,
+    event.params.active,
+    event.block
+  );
 }

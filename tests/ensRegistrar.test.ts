@@ -1,4 +1,4 @@
-import { Address, BigInt, Bytes, ethereum } from "@graphprotocol/graph-ts";
+import { Address, BigInt, Bytes, crypto, ethereum } from "@graphprotocol/graph-ts";
 import {
   assert,
   beforeAll,
@@ -9,18 +9,30 @@ import {
 import { handleNewOwner } from "../src/ensRegistry";
 import {
   handleNameRegistered,
+  handleNameRegisteredByLegacyController,
   handleNameRegisteredByUnwrappedController,
   handleNameRegisteredByWrappedController,
+  handleNameRenewed,
+  handleNameRenewedByLegacyController,
   handleNameRenewedByUnwrappedController,
+  handleNameTransferred,
 } from "../src/ethRegistrar";
-import { NameRegistered } from "../src/types/BaseRegistrar/BaseRegistrar";
-import { Registration } from "../src/types/schema";
+import {
+  NameRegistered,
+  NameRenewed as BaseRegistrarNameRenewed,
+  Transfer as BaseRegistrarTransfer,
+} from "../src/types/BaseRegistrar/BaseRegistrar";
+import {
+  NameRegistered as LegacyNameRegistered,
+  NameRenewed as LegacyNameRenewed,
+} from "../src/types/LegacyEthRegistrarController/LegacyEthRegistrarController";
+import { Domain, Registration } from "../src/types/schema";
 import {
   NameRegistered as UnwrappedEthRegistrarController_NameRegistered,
   NameRenewed as UnwrappedEthRegistrarController_NameRenewed,
 } from "../src/types/UnwrappedEthRegistrarController/UnwrappedEthRegistrarController";
 import { NameRegistered as WrappedEthRegistrarController_NameRegistered } from "../src/types/WrappedEthRegistrarController/WrappedEthRegistrarController";
-import { ETH_NODE } from "../src/utils";
+import { concat, createLegacyEventID, ETH_NODE } from "../src/utils";
 import { createNewOwnerEvent, DEFAULT_OWNER, setEthOwner } from "./testUtils";
 
 describe("legacy/wrapped controller", () => {
@@ -123,7 +135,7 @@ describe("legacy/wrapped controller", () => {
     label: string
   ): void => {
     const newNewOwnerEvent = createNewOwnerEvent(
-      ETH_NODE,
+      ETH_NODE.toHexString(),
       labelhash,
       DEFAULT_OWNER
     );
@@ -218,7 +230,7 @@ describe("legacy/wrapped controller", () => {
     const label = "test";
 
     const newNewOwnerEvent = createNewOwnerEvent(
-      ETH_NODE,
+      ETH_NODE.toHexString(),
       labelhash,
       DEFAULT_OWNER
     );
@@ -410,7 +422,7 @@ describe("unwrapped controller", () => {
     label: string
   ): void => {
     const newNewOwnerEvent = createNewOwnerEvent(
-      ETH_NODE,
+      ETH_NODE.toHexString(),
       labelhash,
       DEFAULT_OWNER
     );
@@ -509,7 +521,7 @@ describe("unwrapped controller", () => {
     const label = "test";
 
     const newNewOwnerEvent = createNewOwnerEvent(
-      ETH_NODE,
+      ETH_NODE.toHexString(),
       labelhash,
       DEFAULT_OWNER
     );
@@ -557,7 +569,7 @@ describe("unwrapped controller", () => {
 
     // First register the name
     const newNewOwnerEvent = createNewOwnerEvent(
-      ETH_NODE,
+      ETH_NODE.toHexString(),
       labelhash,
       DEFAULT_OWNER
     );
@@ -623,7 +635,7 @@ describe("unwrapped controller", () => {
 
     // First register the name
     const newNewOwnerEvent = createNewOwnerEvent(
-      ETH_NODE,
+      ETH_NODE.toHexString(),
       labelhash,
       DEFAULT_OWNER
     );
@@ -658,5 +670,467 @@ describe("unwrapped controller", () => {
       fetchedRegistration.cost!.equals(BigInt.fromString("1000000000"))
     );
     assert.assertNull(fetchedRegistration.labelName);
+  });
+});
+
+describe("BaseRegistrar's own NameRenewed/Transfer, and LegacyEthRegistrarController", () => {
+  const createNameRenewedEvent = (id: string, expires: string): BaseRegistrarNameRenewed => {
+    let mockEvent = newMockEvent();
+    let event = new BaseRegistrarNameRenewed(
+      mockEvent.address,
+      mockEvent.logIndex,
+      mockEvent.transactionLogIndex,
+      mockEvent.logType,
+      mockEvent.block,
+      mockEvent.transaction,
+      mockEvent.parameters,
+      mockEvent.receipt
+    );
+    event.parameters = new Array();
+    event.parameters.push(
+      new ethereum.EventParam("id", ethereum.Value.fromSignedBigInt(BigInt.fromString(id)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("expires", ethereum.Value.fromSignedBigInt(BigInt.fromString(expires)))
+    );
+    return event;
+  };
+
+  const createTransferEvent = (
+    from: string,
+    to: string,
+    tokenId: string
+  ): BaseRegistrarTransfer => {
+    let mockEvent = newMockEvent();
+    let event = new BaseRegistrarTransfer(
+      mockEvent.address,
+      mockEvent.logIndex,
+      mockEvent.transactionLogIndex,
+      mockEvent.logType,
+      mockEvent.block,
+      mockEvent.transaction,
+      mockEvent.parameters,
+      mockEvent.receipt
+    );
+    event.parameters = new Array();
+    event.parameters.push(
+      new ethereum.EventParam("from", ethereum.Value.fromAddress(Address.fromString(from)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("to", ethereum.Value.fromAddress(Address.fromString(to)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("tokenId", ethereum.Value.fromSignedBigInt(BigInt.fromString(tokenId)))
+    );
+    return event;
+  };
+
+  const createLegacyNameRegisteredEvent = (
+    name: string,
+    label: string,
+    owner: string,
+    cost: string,
+    expires: string
+  ): LegacyNameRegistered => {
+    let mockEvent = newMockEvent();
+    let event = new LegacyNameRegistered(
+      mockEvent.address,
+      mockEvent.logIndex,
+      mockEvent.transactionLogIndex,
+      mockEvent.logType,
+      mockEvent.block,
+      mockEvent.transaction,
+      mockEvent.parameters,
+      mockEvent.receipt
+    );
+    event.parameters = new Array();
+    event.parameters.push(new ethereum.EventParam("name", ethereum.Value.fromString(name)));
+    event.parameters.push(
+      new ethereum.EventParam("label", ethereum.Value.fromFixedBytes(Bytes.fromHexString(label)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("owner", ethereum.Value.fromAddress(Address.fromString(owner)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("cost", ethereum.Value.fromUnsignedBigInt(BigInt.fromString(cost)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("expires", ethereum.Value.fromUnsignedBigInt(BigInt.fromString(expires)))
+    );
+    return event;
+  };
+
+  const createLegacyNameRenewedEvent = (
+    name: string,
+    label: string,
+    cost: string,
+    expires: string
+  ): LegacyNameRenewed => {
+    let mockEvent = newMockEvent();
+    let event = new LegacyNameRenewed(
+      mockEvent.address,
+      mockEvent.logIndex,
+      mockEvent.transactionLogIndex,
+      mockEvent.logType,
+      mockEvent.block,
+      mockEvent.transaction,
+      mockEvent.parameters,
+      mockEvent.receipt
+    );
+    event.parameters = new Array();
+    event.parameters.push(new ethereum.EventParam("name", ethereum.Value.fromString(name)));
+    event.parameters.push(
+      new ethereum.EventParam("label", ethereum.Value.fromFixedBytes(Bytes.fromHexString(label)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("cost", ethereum.Value.fromUnsignedBigInt(BigInt.fromString(cost)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("expires", ethereum.Value.fromUnsignedBigInt(BigInt.fromString(expires)))
+    );
+    return event;
+  };
+
+  const createNameRegisteredEventForBaseRegistrar = (
+    id: string,
+    owner: string,
+    expires: string
+  ): NameRegistered => {
+    let mockEvent = newMockEvent();
+    let event = new NameRegistered(
+      mockEvent.address,
+      mockEvent.logIndex,
+      mockEvent.transactionLogIndex,
+      mockEvent.logType,
+      mockEvent.block,
+      mockEvent.transaction,
+      mockEvent.parameters,
+      mockEvent.receipt
+    );
+    event.parameters = new Array();
+    event.parameters.push(
+      new ethereum.EventParam("id", ethereum.Value.fromSignedBigInt(BigInt.fromString(id)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("owner", ethereum.Value.fromAddress(Address.fromString(owner)))
+    );
+    event.parameters.push(
+      new ethereum.EventParam("expires", ethereum.Value.fromSignedBigInt(BigInt.fromString(expires)))
+    );
+    return event;
+  };
+
+  beforeAll(() => {
+    setEthOwner();
+  });
+
+  test("handleNameRenewed updates Registration/Domain expiryDate and writes history", () => {
+    const labelhash =
+      "0xf0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0";
+    const labelhashAsInt =
+      "108980789870415242751596221184647442685430573802955824978313020242741769072880";
+
+    const newNewOwnerEvent = createNewOwnerEvent(
+      ETH_NODE.toHexString(),
+      labelhash,
+      DEFAULT_OWNER
+    );
+    handleNewOwner(newNewOwnerEvent);
+
+    let newRegistrationEvent = createNameRegisteredEventForBaseRegistrar(
+      labelhashAsInt,
+      DEFAULT_OWNER,
+      "1610000000"
+    );
+    handleNameRegistered(newRegistrationEvent);
+
+    let domainId = Bytes.fromByteArray(
+      crypto.keccak256(concat(ETH_NODE, Bytes.fromHexString(labelhash)))
+    );
+
+    const renewedEvent = createNameRenewedEvent(labelhashAsInt, "1620000000");
+    handleNameRenewed(renewedEvent);
+
+    let fetchedRegistration = Registration.load(labelhash)!;
+    assert.assertTrue(
+      fetchedRegistration.expiryDate.equals(BigInt.fromString("1620000000"))
+    );
+
+    // Domain.expiryDate includes the 90-day grace period, matching
+    // handleNameRegistered's own convention for the same field.
+    let fetchedDomain = Domain.load(domainId.toHexString())!;
+    assert.assertTrue(
+      fetchedDomain.expiryDate!.equals(BigInt.fromString("1627776000"))
+    );
+
+    let eventId = createLegacyEventID(renewedEvent);
+    assert.fieldEquals(
+      "NameRenewed",
+      eventId,
+      "registration",
+      Bytes.fromHexString(labelhash).toHexString()
+    );
+    assert.fieldEquals("NameRenewed", eventId, "expiryDate", "1620000000");
+  });
+
+  test("handleNameRenewed processes a second, later renewal on the same Registration correctly", () => {
+    const labelhash =
+      "0x9090909090909090909090909090909090909090909090909090909090909090";
+    const labelhashAsInt =
+      "65388473922249145650957732710788465611258344281773494986987812145645061443728";
+
+    const newNewOwnerEvent = createNewOwnerEvent(
+      ETH_NODE.toHexString(),
+      labelhash,
+      DEFAULT_OWNER
+    );
+    handleNewOwner(newNewOwnerEvent);
+
+    let newRegistrationEvent = createNameRegisteredEventForBaseRegistrar(
+      labelhashAsInt,
+      DEFAULT_OWNER,
+      "1610000000"
+    );
+    handleNameRegistered(newRegistrationEvent);
+
+    let domainId = Bytes.fromByteArray(
+      crypto.keccak256(concat(ETH_NODE, Bytes.fromHexString(labelhash)))
+    );
+
+    handleNameRenewed(createNameRenewedEvent(labelhashAsInt, "1620000000"));
+    handleNameRenewed(createNameRenewedEvent(labelhashAsInt, "1630000000"));
+
+    // The second renewal's absolute expiry must win outright -- expiryDate
+    // is always a flat overwrite from the event's own value, not additive,
+    // so two renewals must not double-count anything.
+    let fetchedRegistration = Registration.load(labelhash)!;
+    assert.assertTrue(
+      fetchedRegistration.expiryDate.equals(BigInt.fromString("1630000000"))
+    );
+    let fetchedDomain = Domain.load(domainId.toHexString())!;
+    assert.assertTrue(
+      fetchedDomain.expiryDate!.equals(BigInt.fromString("1637776000"))
+    );
+  });
+
+  test("handleNameTransferred updates Registration/Domain registrant, writes history, and no-ops for an unregistered tokenId", () => {
+    const labelhash =
+      "0xe1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1";
+    const labelhashAsInt =
+      "102169490503514290079621457360606977517591162940271085917168456477570408505825";
+    const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+
+    const newNewOwnerEvent = createNewOwnerEvent(
+      ETH_NODE.toHexString(),
+      labelhash,
+      DEFAULT_OWNER
+    );
+    handleNewOwner(newNewOwnerEvent);
+
+    let newRegistrationEvent = createNameRegisteredEventForBaseRegistrar(
+      labelhashAsInt,
+      DEFAULT_OWNER,
+      "1610000000"
+    );
+    handleNameRegistered(newRegistrationEvent);
+
+    let domainId = Bytes.fromByteArray(
+      crypto.keccak256(concat(ETH_NODE, Bytes.fromHexString(labelhash)))
+    );
+
+    const transferEvent = createTransferEvent(
+      DEFAULT_OWNER,
+      newOwner,
+      labelhashAsInt
+    );
+    handleNameTransferred(transferEvent);
+
+    assert.fieldEquals(
+      "Registration",
+      Bytes.fromHexString(labelhash).toHexString(),
+      "registrant",
+      Address.fromString(newOwner).toHexString()
+    );
+    assert.fieldEquals(
+      "Domain",
+      domainId.toHexString(),
+      "registrant",
+      Address.fromString(newOwner).toHexString()
+    );
+
+    let eventId = createLegacyEventID(transferEvent);
+    assert.fieldEquals("NameTransferred", eventId, "newOwner", Address.fromString(newOwner).toHexString());
+
+    // A second, later transfer on the same already-registered name -- a
+    // completely ordinary real-world sequence (a name gets resold) -- must
+    // keep updating registrant correctly, not just work once.
+    const thirdOwner = "0x1234567890123456789012345678901234567890";
+    const secondTransferEvent = createTransferEvent(
+      newOwner,
+      thirdOwner,
+      labelhashAsInt
+    );
+    handleNameTransferred(secondTransferEvent);
+
+    assert.fieldEquals(
+      "Registration",
+      Bytes.fromHexString(labelhash).toHexString(),
+      "registrant",
+      Address.fromString(thirdOwner).toHexString()
+    );
+    assert.fieldEquals(
+      "Domain",
+      domainId.toHexString(),
+      "registrant",
+      Address.fromString(thirdOwner).toHexString()
+    );
+
+    // No Registration exists at all for this tokenId -- must no-op, not crash.
+    const unregisteredLabelhash =
+      "0xa5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5";
+    const unregisteredLabelhashAsInt =
+      "74924293035910479391722402064445116846233519489532129672590201416884966237605";
+    const unregisteredTransferEvent = createTransferEvent(
+      DEFAULT_OWNER,
+      newOwner,
+      unregisteredLabelhashAsInt
+    );
+    handleNameTransferred(unregisteredTransferEvent);
+
+    assert.notInStore("Registration", Bytes.fromHexString(unregisteredLabelhash).toHexString());
+  });
+
+  test("handleNameRegisteredByLegacyController sets labelName/cost via the shared setNamePreimage path", () => {
+    const labelhash =
+      "0xd2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2";
+    const labelhashAsInt =
+      "95358191136613337407646693536566512349751752077586346856023892712399047938770";
+    const label = "legacyreg";
+
+    const newNewOwnerEvent = createNewOwnerEvent(
+      ETH_NODE.toHexString(),
+      labelhash,
+      DEFAULT_OWNER
+    );
+    handleNewOwner(newNewOwnerEvent);
+
+    let newRegistrationEvent = createNameRegisteredEventForBaseRegistrar(
+      labelhashAsInt,
+      DEFAULT_OWNER,
+      "1610000000"
+    );
+    handleNameRegistered(newRegistrationEvent);
+
+    const legacyEvent = createLegacyNameRegisteredEvent(
+      label,
+      labelhash,
+      DEFAULT_OWNER,
+      "1000000000",
+      "1610000000"
+    );
+    handleNameRegisteredByLegacyController(legacyEvent);
+
+    let fetchedRegistration = Registration.load(labelhash)!;
+    assert.assertTrue(fetchedRegistration.labelName == label);
+    assert.assertTrue(
+      fetchedRegistration.cost!.equals(BigInt.fromString("1000000000"))
+    );
+  });
+
+  test("setNamePreimage's no-Domain branch: no crash, no Registration created, when the Domain was never registered at all", () => {
+    const labelhash =
+      "0xb4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4";
+    const label = "nodomain";
+
+    // No handleNewOwner, no handleNameRegistered -- the Domain this label
+    // would hash to genuinely doesn't exist anywhere in the store.
+    const legacyEvent = createLegacyNameRegisteredEvent(
+      label,
+      labelhash,
+      DEFAULT_OWNER,
+      "1000000000",
+      "1610000000"
+    );
+    handleNameRegisteredByLegacyController(legacyEvent);
+
+    assert.notInStore("Registration", Bytes.fromHexString(labelhash).toHexString());
+  });
+
+  test("setNamePreimage's no-Registration branch: updates Domain.labelName but creates no Registration", () => {
+    const labelhash =
+      "0xb7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7";
+    const label = "noregistration";
+
+    // handleNewOwner creates the Domain (via ENSRegistry), but
+    // handleNameRegistered (which creates the Registration) is deliberately
+    // skipped -- setNamePreimage should still update the Domain's
+    // labelName/name, but has nothing to attach cost/labelName to on the
+    // Registration side, so none gets created.
+    const newNewOwnerEvent = createNewOwnerEvent(
+      ETH_NODE.toHexString(),
+      labelhash,
+      DEFAULT_OWNER
+    );
+    handleNewOwner(newNewOwnerEvent);
+
+    const legacyEvent = createLegacyNameRegisteredEvent(
+      label,
+      labelhash,
+      DEFAULT_OWNER,
+      "1000000000",
+      "1610000000"
+    );
+    handleNameRegisteredByLegacyController(legacyEvent);
+
+    let domainId = Bytes.fromByteArray(
+      crypto.keccak256(concat(ETH_NODE, Bytes.fromHexString(labelhash)))
+    );
+    assert.fieldEquals("Domain", domainId.toHexString(), "labelName", label);
+    assert.notInStore("Registration", Bytes.fromHexString(labelhash).toHexString());
+  });
+
+  test("handleNameRenewedByLegacyController updates cost via the shared setNamePreimage path", () => {
+    const labelhash =
+      "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+    const labelhashAsInt =
+      "88546891769712384735671929712526047181912341214901607794879328947227687371715";
+    const label = "legacyrenew";
+
+    const newNewOwnerEvent = createNewOwnerEvent(
+      ETH_NODE.toHexString(),
+      labelhash,
+      DEFAULT_OWNER
+    );
+    handleNewOwner(newNewOwnerEvent);
+
+    let newRegistrationEvent = createNameRegisteredEventForBaseRegistrar(
+      labelhashAsInt,
+      DEFAULT_OWNER,
+      "1610000000"
+    );
+    handleNameRegistered(newRegistrationEvent);
+
+    const legacyRegisteredEvent = createLegacyNameRegisteredEvent(
+      label,
+      labelhash,
+      DEFAULT_OWNER,
+      "1000000000",
+      "1610000000"
+    );
+    handleNameRegisteredByLegacyController(legacyRegisteredEvent);
+
+    const legacyRenewedEvent = createLegacyNameRenewedEvent(
+      label,
+      labelhash,
+      "2000000000",
+      "1620000000"
+    );
+    handleNameRenewedByLegacyController(legacyRenewedEvent);
+
+    let fetchedRegistration = Registration.load(labelhash)!;
+    assert.assertTrue(fetchedRegistration.labelName == label);
+    assert.assertTrue(
+      fetchedRegistration.cost!.equals(BigInt.fromString("2000000000"))
+    );
   });
 });

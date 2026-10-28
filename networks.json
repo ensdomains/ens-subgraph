@@ -30,6 +30,29 @@
     "UnwrappedEthRegistrarController": {
       "address": "0x59E16fcCd424Cc24e280Be16E11Bcd56fb0CE547",
       "startBlock": 22764821
+    },
+    "RootRegistry": {
+      "address": "0x2553c09be6447beffdb86fa622ad41fb8f77a91e",
+      "startBlock": 26183742
+    },
+    "ETHRegistry": {
+      "address": "0xf60aba43e1f7f3dab1186ff03b561401c9df85e2",
+      "startBlock": 26105621
+    },
+    "ETHRegistrar": {
+      "address": "0xd6d8369e55c94ae8afa714e6cf7ab5be54d5cc81",
+      "startBlock": 26183999
+    },
+    "VerifiableFactory": {
+      "address": "0x77510ba162dfea3d8989e3f0928a691b345730d2",
+      "startBlock": 26105299
+    },
+    "PermissionedResolver": {
+      "startBlock": 26105631
+    },
+    "DefaultReverseRegistrar": {
+      "address": "0x283F227c4Bd38ecE252C4Ae7ECE650B0e913f1f9",
+      "startBlock": 22764819
     }
   },
   "sepolia": {
@@ -63,39 +86,29 @@
     "UnwrappedEthRegistrarController": {
       "address": "0xfb3cE5D01e0f33f41DbB39035dB9745962F1f968",
       "startBlock": 8579988
-    }
-  },
-  "holesky": {
-    "ENSRegistry": {
-      "address": "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e",
-      "startBlock": 801613
     },
-    "ENSRegistryOld": {
-      "address": "0x94f523b8261B815b87EFfCf4d18E6aBeF18d6e4b",
-      "startBlock": 801536
+    "RootRegistry": {
+      "address": "0xB458D6a3a77919449d03e7A6903C26827c1eC43f",
+      "startBlock": 11820291
     },
-    "Resolver": {
-      "startBlock": 801536
+    "ETHRegistry": {
+      "address": "0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4",
+      "startBlock": 11820399
     },
-    "BaseRegistrar": {
-      "address": "0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85",
-      "startBlock": 801686
+    "ETHRegistrar": {
+      "address": "0xf633e7FC17e2bbE0D0965D18ec1821dcB754a3d3",
+      "startBlock": 11820440
     },
-    "LegacyEthRegistrarController": {
-      "address": "0xf13fC748601fDc5afA255e9D9166EB43f603a903",
-      "startBlock": 815355
+    "VerifiableFactory": {
+      "address": "0xDa70306C98E97eCe36F997a21368e53298572991",
+      "startBlock": 11820318
     },
-    "WrappedEthRegistrarController": {
-      "address": "0x179Be112b24Ad4cFC392eF8924DfA08C20Ad8583",
-      "startBlock": 815359
+    "PermissionedResolver": {
+      "startBlock": 11820406
     },
-    "NameWrapper": {
-      "address": "0xab50971078225D365994dc1Edcb9b7FD72Bb4862",
-      "startBlock": 815127
-    },
-    "UnwrappedEthRegistrarController": {
-      "address": "0xFce6ce4373CB6E7e470EAa55329638acD9Dbd202",
-      "startBlock": 4027261
+    "DefaultReverseRegistrar": {
+      "address": "0x4F382928805ba0e23B30cFB75fC9E848e82DFD47",
+      "startBlock": 8579966
     }
   }
 }

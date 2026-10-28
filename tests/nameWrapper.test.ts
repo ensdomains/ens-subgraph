@@ -6,10 +6,22 @@ import {
   newMockEvent,
   test,
 } from "matchstick-as/assembly/index";
-import { handleNameUnwrapped } from "../src/nameWrapper";
-import { NameUnwrapped } from "../src/types/NameWrapper/NameWrapper";
+import {
+  handleExpiryExtended,
+  handleFusesSet,
+  handleNameUnwrapped,
+  handleTransferBatch,
+  handleTransferSingle,
+} from "../src/nameWrapper";
+import {
+  ExpiryExtended,
+  FusesSet,
+  NameUnwrapped,
+  TransferBatch,
+  TransferSingle,
+} from "../src/types/NameWrapper/NameWrapper";
 import { Domain, WrappedDomain } from "../src/types/schema";
-import { ETH_NODE } from "../src/utils";
+import { createLegacyEventID, ETH_NODE } from "../src/utils";
 import { DEFAULT_OWNER, setEthOwner } from "./testUtils";
 
 beforeAll(() => {
@@ -60,7 +72,7 @@ describe("handleNameUnwrapped", () => {
     domain.name = "test.eth";
     domain.labelName = "test";
     domain.labelhash = Bytes.fromHexString(labelhash);
-    domain.parent = ETH_NODE;
+    domain.parent = ETH_NODE.toHexString();
     domain.subdomainCount = 0;
     domain.isMigrated = true;
     domain.createdAt = BigInt.fromI32(0);
@@ -125,5 +137,479 @@ describe("handleNameUnwrapped", () => {
     handleNameUnwrapped(nameUnwrappedEvent);
 
     assert.fieldEquals("Domain", subNamehash, "expiryDate", "null");
+  });
+});
+
+const createFusesSetEvent = (node: string, fuses: i32): FusesSet => {
+  let mockEvent = newMockEvent();
+  let event = new FusesSet(
+    mockEvent.address,
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam("node", ethereum.Value.fromFixedBytes(Bytes.fromHexString(node)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("fuses", ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(fuses)))
+  );
+  return event;
+};
+
+const createExpiryExtendedEvent = (node: string, expiry: BigInt): ExpiryExtended => {
+  let mockEvent = newMockEvent();
+  let event = new ExpiryExtended(
+    mockEvent.address,
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam("node", ethereum.Value.fromFixedBytes(Bytes.fromHexString(node)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("expiry", ethereum.Value.fromUnsignedBigInt(expiry))
+  );
+  return event;
+};
+
+const createTransferSingleEvent = (
+  from: string,
+  to: string,
+  id: BigInt
+): TransferSingle => {
+  let mockEvent = newMockEvent();
+  let event = new TransferSingle(
+    mockEvent.address,
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam("operator", ethereum.Value.fromAddress(Address.fromString(from)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("from", ethereum.Value.fromAddress(Address.fromString(from)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("to", ethereum.Value.fromAddress(Address.fromString(to)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("id", ethereum.Value.fromUnsignedBigInt(id))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("value", ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(1)))
+  );
+  return event;
+};
+
+const createTransferBatchEvent = (
+  from: string,
+  to: string,
+  ids: Array<BigInt>
+): TransferBatch => {
+  let mockEvent = newMockEvent();
+  let event = new TransferBatch(
+    mockEvent.address,
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  let values = new Array<BigInt>();
+  for (let i = 0; i < ids.length; i++) {
+    values.push(BigInt.fromI32(1));
+  }
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam("operator", ethereum.Value.fromAddress(Address.fromString(from)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("from", ethereum.Value.fromAddress(Address.fromString(from)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("to", ethereum.Value.fromAddress(Address.fromString(to)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("ids", ethereum.Value.fromUnsignedBigIntArray(ids))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("values", ethereum.Value.fromUnsignedBigIntArray(values))
+  );
+  return event;
+};
+
+// Matches nameWrapper.ts::checkPccBurned's own constant.
+const PARENT_CANNOT_CONTROL: i32 = 65536;
+
+describe("handleFusesSet", () => {
+  test("writes history but touches no Domain when no WrappedDomain exists yet", () => {
+    const node =
+      "0x1111111111111111111111111111111111111111111111111111111111111111";
+    const event = createFusesSetEvent(node, 1);
+    handleFusesSet(event);
+
+    assert.notInStore("WrappedDomain", node);
+    assert.notInStore("Domain", node);
+
+    let eventId = createLegacyEventID(event);
+    assert.fieldEquals("FusesSet", eventId, "domain", node);
+    assert.fieldEquals("FusesSet", eventId, "fuses", "1");
+  });
+
+  test("bumps Domain.expiryDate to match once PARENT_CANNOT_CONTROL is burned", () => {
+    const node =
+      "0x2222222222222222222222222222222222222222222222222222222222222222";
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.expiryDate = BigInt.fromI32(100);
+    domain.save();
+
+    let wrappedDomain = new WrappedDomain(node);
+    wrappedDomain.domain = node;
+    wrappedDomain.expiryDate = BigInt.fromI32(500);
+    wrappedDomain.fuses = 0;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.save();
+
+    const event = createFusesSetEvent(node, PARENT_CANNOT_CONTROL);
+    handleFusesSet(event);
+
+    assert.fieldEquals("WrappedDomain", node, "fuses", PARENT_CANNOT_CONTROL.toString());
+    // wrappedDomain.expiryDate (500) is later than the pre-seeded
+    // domain.expiryDate (100), so once PCC is burned it takes over.
+    assert.fieldEquals("Domain", node, "expiryDate", "500");
+  });
+
+  test("does not downgrade Domain.expiryDate when the wrapped expiry is earlier", () => {
+    const node =
+      "0x6666666666666666666666666666666666666666666666666666666666666666";
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.expiryDate = BigInt.fromI32(99999);
+    domain.save();
+
+    let wrappedDomain = new WrappedDomain(node);
+    wrappedDomain.domain = node;
+    wrappedDomain.expiryDate = BigInt.fromI32(100);
+    wrappedDomain.fuses = 0;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.save();
+
+    const event = createFusesSetEvent(node, PARENT_CANNOT_CONTROL);
+    handleFusesSet(event);
+
+    // fuses always updates unconditionally...
+    assert.fieldEquals("WrappedDomain", node, "fuses", PARENT_CANNOT_CONTROL.toString());
+    // ...but wrappedDomain.expiryDate (100) is NOT later than the existing
+    // domain.expiryDate (99999), so the domain-side bump must be skipped.
+    assert.fieldEquals("Domain", node, "expiryDate", "99999");
+  });
+});
+
+describe("handleExpiryExtended", () => {
+  test("writes history but touches no Domain when no WrappedDomain exists yet", () => {
+    const node =
+      "0x3333333333333333333333333333333333333333333333333333333333333333";
+    const event = createExpiryExtendedEvent(node, BigInt.fromI32(999));
+    handleExpiryExtended(event);
+
+    assert.notInStore("WrappedDomain", node);
+    assert.notInStore("Domain", node);
+
+    let eventId = createLegacyEventID(event);
+    assert.fieldEquals("ExpiryExtended", eventId, "domain", node);
+    assert.fieldEquals("ExpiryExtended", eventId, "expiryDate", "999");
+  });
+
+  test("bumps Domain.expiryDate for an already-PCC-burned WrappedDomain", () => {
+    const node =
+      "0x4444444444444444444444444444444444444444444444444444444444444444";
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.expiryDate = BigInt.fromI32(100);
+    domain.save();
+
+    let wrappedDomain = new WrappedDomain(node);
+    wrappedDomain.domain = node;
+    wrappedDomain.expiryDate = BigInt.fromI32(200);
+    wrappedDomain.fuses = PARENT_CANNOT_CONTROL;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.save();
+
+    const event = createExpiryExtendedEvent(node, BigInt.fromI32(1000));
+    handleExpiryExtended(event);
+
+    assert.fieldEquals("WrappedDomain", node, "expiryDate", "1000");
+    assert.fieldEquals("Domain", node, "expiryDate", "1000");
+  });
+
+  test("still updates WrappedDomain.expiryDate but does not downgrade Domain.expiryDate", () => {
+    const node =
+      "0x7777777777777777777777777777777777777777777777777777777777777777";
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.expiryDate = BigInt.fromI32(99999);
+    domain.save();
+
+    let wrappedDomain = new WrappedDomain(node);
+    wrappedDomain.domain = node;
+    wrappedDomain.expiryDate = BigInt.fromI32(100);
+    wrappedDomain.fuses = PARENT_CANNOT_CONTROL;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.save();
+
+    const event = createExpiryExtendedEvent(node, BigInt.fromI32(500));
+    handleExpiryExtended(event);
+
+    // wrappedDomain.expiryDate always updates unconditionally, regardless
+    // of whether it would be a downgrade for the Domain side...
+    assert.fieldEquals("WrappedDomain", node, "expiryDate", "500");
+    // ...but 500 is NOT later than the existing domain.expiryDate (99999),
+    // so the domain-side bump must be skipped.
+    assert.fieldEquals("Domain", node, "expiryDate", "99999");
+  });
+});
+
+describe("handleTransferSingle / handleTransferBatch", () => {
+  test("handleTransferSingle creates a placeholder WrappedDomain, sets domain.wrappedOwner, and writes history", () => {
+    const tokenId = BigInt.fromI32(111222333);
+    const node =
+      "0x0000000000000000000000000000000000000000000000000000000006a11e3d";
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.save();
+
+    const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+    const event = createTransferSingleEvent(DEFAULT_OWNER, newOwner, tokenId);
+    handleTransferSingle(event);
+
+    assert.fieldEquals(
+      "WrappedDomain",
+      node,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+    // Placeholder values until the real NameWrapped event arrives.
+    assert.fieldEquals("WrappedDomain", node, "expiryDate", "0");
+    assert.fieldEquals("WrappedDomain", node, "fuses", "0");
+    assert.fieldEquals(
+      "Domain",
+      node,
+      "wrappedOwner",
+      Address.fromString(newOwner).toHexString()
+    );
+
+    let eventId = createLegacyEventID(event).concat("-0");
+    assert.fieldEquals(
+      "WrappedTransfer",
+      eventId,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+  });
+
+  test("handleTransferSingle on an already-wrapped name updates owner but preserves fuses/expiryDate", () => {
+    const tokenId = BigInt.fromI32(222333444);
+    const node =
+      "0x000000000000000000000000000000000000000000000000000000000d408a04";
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.save();
+
+    // Real wrapped state, not the placeholder zeros makeWrappedTransfer uses
+    // for a fresh mint -- this is what a real, already-wrapped name looks
+    // like by the time it gets transferred again.
+    let wrappedDomain = new WrappedDomain(node);
+    wrappedDomain.domain = node;
+    wrappedDomain.expiryDate = BigInt.fromI32(999999);
+    wrappedDomain.fuses = PARENT_CANNOT_CONTROL;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.save();
+
+    const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+    const event = createTransferSingleEvent(DEFAULT_OWNER, newOwner, tokenId);
+    handleTransferSingle(event);
+
+    assert.fieldEquals(
+      "WrappedDomain",
+      node,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+    // makeWrappedTransfer's update branch (wrappedDomain already existed)
+    // only ever reassigns .owner -- fuses/expiryDate must survive untouched,
+    // not get reset to the fresh-mint placeholder values.
+    assert.fieldEquals("WrappedDomain", node, "expiryDate", "999999");
+    assert.fieldEquals(
+      "WrappedDomain",
+      node,
+      "fuses",
+      PARENT_CANNOT_CONTROL.toString()
+    );
+    assert.fieldEquals(
+      "Domain",
+      node,
+      "wrappedOwner",
+      Address.fromString(newOwner).toHexString()
+    );
+  });
+
+  test("handleTransferBatch updates every token in the batch and writes one history row per index", () => {
+    const tokenIdA = BigInt.fromI32(444555666);
+    const tokenIdB = BigInt.fromI32(777888999);
+    const nodeA =
+      "0x000000000000000000000000000000000000000000000000000000001a7f6192";
+    const nodeB =
+      "0x000000000000000000000000000000000000000000000000000000002e5da4e7";
+
+    let domainA = new Domain(nodeA);
+    domainA.owner = DEFAULT_OWNER;
+    domainA.isMigrated = true;
+    domainA.subdomainCount = 0;
+    domainA.createdAt = BigInt.fromI32(0);
+    domainA.save();
+
+    let domainB = new Domain(nodeB);
+    domainB.owner = DEFAULT_OWNER;
+    domainB.isMigrated = true;
+    domainB.subdomainCount = 0;
+    domainB.createdAt = BigInt.fromI32(0);
+    domainB.save();
+
+    const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+    const event = createTransferBatchEvent(DEFAULT_OWNER, newOwner, [
+      tokenIdA,
+      tokenIdB,
+    ]);
+    handleTransferBatch(event);
+
+    assert.fieldEquals(
+      "WrappedDomain",
+      nodeA,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+    assert.fieldEquals(
+      "WrappedDomain",
+      nodeB,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+
+    let eventIdA = createLegacyEventID(event).concat("-0");
+    let eventIdB = createLegacyEventID(event).concat("-1");
+    assert.fieldEquals("WrappedTransfer", eventIdA, "domain", nodeA);
+    assert.fieldEquals("WrappedTransfer", eventIdB, "domain", nodeB);
+  });
+
+  test("handleTransferBatch handles a fresh mint and an already-wrapped transfer in the same batch", () => {
+    const freshTokenId = BigInt.fromI32(555666777);
+    const existingTokenId = BigInt.fromI32(888999111);
+    const freshNode =
+      "0x00000000000000000000000000000000000000000000000000000000211ecd59";
+    const existingNode =
+      "0x0000000000000000000000000000000000000000000000000000000034fd0cc7";
+
+    let freshDomain = new Domain(freshNode);
+    freshDomain.owner = DEFAULT_OWNER;
+    freshDomain.isMigrated = true;
+    freshDomain.subdomainCount = 0;
+    freshDomain.createdAt = BigInt.fromI32(0);
+    freshDomain.save();
+
+    let existingDomain = new Domain(existingNode);
+    existingDomain.owner = DEFAULT_OWNER;
+    existingDomain.isMigrated = true;
+    existingDomain.subdomainCount = 0;
+    existingDomain.createdAt = BigInt.fromI32(0);
+    existingDomain.save();
+
+    // Only the second token already has a real WrappedDomain -- the first
+    // exercises the create-placeholder branch of makeWrappedTransfer in the
+    // very same batch call as an update to an existing row, proving the
+    // per-index branching inside handleTransferBatch's loop doesn't leak
+    // state between iterations.
+    let existingWrappedDomain = new WrappedDomain(existingNode);
+    existingWrappedDomain.domain = existingNode;
+    existingWrappedDomain.expiryDate = BigInt.fromI32(555555);
+    existingWrappedDomain.fuses = PARENT_CANNOT_CONTROL;
+    existingWrappedDomain.owner = DEFAULT_OWNER;
+    existingWrappedDomain.save();
+
+    const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+    const event = createTransferBatchEvent(DEFAULT_OWNER, newOwner, [
+      freshTokenId,
+      existingTokenId,
+    ]);
+    handleTransferBatch(event);
+
+    // Fresh mint: placeholder expiry/fuses.
+    assert.fieldEquals(
+      "WrappedDomain",
+      freshNode,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+    assert.fieldEquals("WrappedDomain", freshNode, "expiryDate", "0");
+    assert.fieldEquals("WrappedDomain", freshNode, "fuses", "0");
+
+    // Already-wrapped: owner updates, real fuses/expiryDate survive.
+    assert.fieldEquals(
+      "WrappedDomain",
+      existingNode,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+    assert.fieldEquals("WrappedDomain", existingNode, "expiryDate", "555555");
+    assert.fieldEquals(
+      "WrappedDomain",
+      existingNode,
+      "fuses",
+      PARENT_CANNOT_CONTROL.toString()
+    );
   });
 });

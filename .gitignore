@@ -1,6 +1,7 @@
 # Graph cli generated
 src/types
 build/
+.subgraph.*.yaml
 .DS_STORE
 
 # Logs
