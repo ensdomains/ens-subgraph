@@ -10,6 +10,7 @@ import {
 
 import {
   checkValidLabel,
+  clampLegacyExpiry,
   concat,
   createLegacyEventID,
   ETH_NODE,
@@ -84,11 +85,13 @@ export function handleNameRegistered(event: NameRegisteredEvent): void {
   let registration = new Registration(labelHex);
   registration.domain = domain.id;
   registration.registrationDate = event.block.timestamp;
-  registration.expiryDate = event.params.expires;
+  registration.expiryDate = clampLegacyExpiry(event.params.expires);
   registration.registrant = account.id;
 
   domain.registrant = account.id;
-  domain.expiryDate = event.params.expires.plus(GRACE_PERIOD_SECONDS);
+  domain.expiryDate = clampLegacyExpiry(
+    event.params.expires.plus(GRACE_PERIOD_SECONDS)
+  );
 
   // A fresh .eth registration means any previous wrapped registration has lapsed
   // (a name leaving the NameWrapper by expiry emits no NameUnwrapped event, so the
@@ -206,8 +209,12 @@ export function handleNameRenewed(event: NameRenewedEvent): void {
     return;
   }
 
-  registration.expiryDate = event.params.expires;
-  domain.expiryDate = event.params.expires.plus(GRACE_PERIOD_SECONDS);
+  // Graveyard-parked migrated names are renewed up to uint64 max minus the
+  // grace period; clamp both legacy fields (event rows keep the raw value).
+  registration.expiryDate = clampLegacyExpiry(event.params.expires);
+  domain.expiryDate = clampLegacyExpiry(
+    event.params.expires.plus(GRACE_PERIOD_SECONDS)
+  );
 
   registration.save();
   domain.save();

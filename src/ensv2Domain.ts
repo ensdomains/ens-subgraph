@@ -17,7 +17,7 @@
 // different — they're what real consumers read to find "who controls this
 // name" — so those get corrected, domain.owner does not.
 import { BigInt, log } from "@graphprotocol/graph-ts";
-import { checkValidLabel, ETH_NODE } from "./utils";
+import { checkValidLabel, clampLegacyExpiry, ETH_NODE } from "./utils";
 import { getEthRegistryAddress, getV2GracePeriod } from "./ensv2Constants";
 import { pathNamehash, registryNamespaceIndexId } from "./ensv2Utils";
 import {
@@ -244,7 +244,7 @@ function syncEthRegistration(
   registration.domain = path.id.toHexString();
   let slotExpiryDate = slot.expiryDate;
   if (slotExpiryDate) {
-    registration.expiryDate = slotExpiryDate;
+    registration.expiryDate = clampLegacyExpiry(slotExpiryDate);
   }
   // Existing migrated rows are corrected by correctMigratedLegacyOwner so
   // wrapped names do not receive a registrant. New rows need this required
@@ -316,11 +316,17 @@ export function projectPathToDomain(
   if (isEth && namespace != null) {
     isCanonicalEthPath = namespace.baseNamehash.equals(ETH_NODE);
   }
+  // Never-expiring slots carry uint64 max; clamp after adding the grace
+  // period so the sum cannot overflow past the legacy maximum either.
   let slotExpiryDate = slot.expiryDate;
   if (isEth && slotExpiryDate) {
-    domain.expiryDate = slotExpiryDate.plus(getV2GracePeriod());
+    domain.expiryDate = clampLegacyExpiry(
+      slotExpiryDate.plus(getV2GracePeriod())
+    );
+  } else if (slotExpiryDate) {
+    domain.expiryDate = clampLegacyExpiry(slotExpiryDate);
   } else {
-    domain.expiryDate = slotExpiryDate;
+    domain.expiryDate = null;
   }
   domain.save();
 

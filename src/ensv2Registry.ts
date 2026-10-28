@@ -21,6 +21,7 @@ import {
 import {
   checkValidLabel,
   concat,
+  clampLegacyExpiry,
   createEventID,
   createOrLoadAccount,
   i32ToBytes,
@@ -344,14 +345,16 @@ export function handleExpiryUpdated(event: ExpiryUpdated): void {
 
     let registration = Registration.load(slot.labelhash.toHexString());
     if (registration != null) {
-      registration.expiryDate = event.params.newExpiry;
+      registration.expiryDate = clampLegacyExpiry(event.params.newExpiry);
       registration.save();
     }
     let domainId = getEthDomainId(slot);
     if (domainId) {
       let domain = Domain.load(domainId);
       if (domain != null) {
-        domain.expiryDate = event.params.newExpiry.plus(getV2GracePeriod());
+        domain.expiryDate = clampLegacyExpiry(
+          event.params.newExpiry.plus(getV2GracePeriod())
+        );
         domain.save();
       }
     }

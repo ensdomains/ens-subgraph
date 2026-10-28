@@ -28,6 +28,7 @@ import {
 } from "./types/schema";
 import {
   checkValidLabel,
+  clampLegacyExpiry,
   concat,
   createLegacyEventID,
   createOrLoadAccount,
@@ -83,6 +84,9 @@ export function handleNameWrapped(event: NameWrappedEvent): void {
   }
   let node = event.params.node;
   let expiryDate = event.params.expiry;
+  // Legacy entity fields hold the clamped value; the NameWrapped event row
+  // below keeps the raw on-chain expiry.
+  let legacyExpiryDate = clampLegacyExpiry(expiryDate);
   let fuses = event.params.fuses.toI32();
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
@@ -95,16 +99,16 @@ export function handleNameWrapped(event: NameWrappedEvent): void {
   }
   if (
     checkPccBurned(fuses) &&
-    (!domain.expiryDate || expiryDate > domain.expiryDate!)
+    (!domain.expiryDate || legacyExpiryDate > domain.expiryDate!)
   ) {
-    domain.expiryDate = expiryDate;
+    domain.expiryDate = legacyExpiryDate;
   }
   domain.wrappedOwner = owner.id;
   domain.save();
 
   let wrappedDomain = new WrappedDomain(node.toHexString());
   wrappedDomain.domain = domain.id;
-  wrappedDomain.expiryDate = expiryDate;
+  wrappedDomain.expiryDate = legacyExpiryDate;
   wrappedDomain.fuses = fuses;
   wrappedDomain.owner = owner.id;
   wrappedDomain.name = name;
@@ -180,16 +184,19 @@ export function handleFusesSet(event: FusesSetEvent): void {
 export function handleExpiryExtended(event: ExpiryExtendedEvent): void {
   let node = event.params.node;
   let expiry = event.params.expiry;
+  // Graveyard-parked migrated names are extended to uint64 max; legacy
+  // entity fields hold the clamped value, the event row keeps the raw one.
+  let legacyExpiry = clampLegacyExpiry(expiry);
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
   let wrappedDomain = WrappedDomain.load(node.toHexString());
   if (wrappedDomain) {
-    wrappedDomain.expiryDate = expiry;
+    wrappedDomain.expiryDate = legacyExpiry;
     wrappedDomain.save();
     if (checkPccBurned(wrappedDomain.fuses)) {
       let domain = createOrLoadDomain(node);
-      if (!domain.expiryDate || expiry > domain.expiryDate!) {
-        domain.expiryDate = expiry;
+      if (!domain.expiryDate || legacyExpiry > domain.expiryDate!) {
+        domain.expiryDate = legacyExpiry;
         domain.save();
       }
     }

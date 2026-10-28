@@ -613,3 +613,34 @@ describe("handleTransferSingle / handleTransferBatch", () => {
     );
   });
 });
+
+describe("handleExpiryExtended with uint64 max (Graveyard-parked migrated names)", () => {
+  test("clamps WrappedDomain/Domain expiryDate to the max supported timestamp and keeps the raw value on the event row", () => {
+    const node =
+      "0x5555555555555555555555555555555555555555555555555555555555555555";
+    const UINT64_MAX = BigInt.fromString("18446744073709551615");
+
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.expiryDate = BigInt.fromI32(100);
+    domain.save();
+
+    let wrappedDomain = new WrappedDomain(node);
+    wrappedDomain.domain = node;
+    wrappedDomain.expiryDate = BigInt.fromI32(200);
+    wrappedDomain.fuses = PARENT_CANNOT_CONTROL;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.save();
+
+    const event = createExpiryExtendedEvent(node, UINT64_MAX);
+    handleExpiryExtended(event);
+
+    assert.fieldEquals("WrappedDomain", node, "expiryDate", "8640000000000");
+    assert.fieldEquals("Domain", node, "expiryDate", "8640000000000");
+    let eventId = createLegacyEventID(event);
+    assert.fieldEquals("ExpiryExtended", eventId, "expiryDate", UINT64_MAX.toString());
+  });
+});

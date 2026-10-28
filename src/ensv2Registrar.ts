@@ -11,7 +11,12 @@
 // other event, so it doesn't matter which arrives first — "correlate by
 // transaction hash plus token ID, do not rely on log order."
 import { log } from "@graphprotocol/graph-ts";
-import { checkValidLabel, createOrLoadAccount, ETH_NODE } from "./utils";
+import {
+  checkValidLabel,
+  clampLegacyExpiry,
+  createOrLoadAccount,
+  ETH_NODE,
+} from "./utils";
 import { getEthRegistryAddress } from "./ensv2Constants";
 import { nameSlotId, pathNamehash, toSlotId } from "./ensv2Utils";
 import {
@@ -36,7 +41,7 @@ export function syncRegistrationFromSlot(slot: ENSv2NameSlot): void {
   }
   let expiryDate = slot.expiryDate;
   if (expiryDate) {
-    registration.expiryDate = expiryDate;
+    registration.expiryDate = clampLegacyExpiry(expiryDate);
   }
   let resource = slot.currentResource;
   if (resource) {
@@ -66,7 +71,7 @@ export function handleNameRegistered(event: NameRegistered): void {
   registration.registrationDate = event.block.timestamp;
   let slot = ENSv2NameSlot.load(id);
   if (slot != null && slot.expiryDate) {
-    registration.expiryDate = slot.expiryDate!;
+    registration.expiryDate = clampLegacyExpiry(slot.expiryDate!);
   } else {
     // The registry event later reconciles this fallback to the canonical
     // absolute expiry through syncRegistrationFromSlot.
@@ -108,7 +113,7 @@ export function handleNameRenewed(event: NameRenewed): void {
   registration.paymentToken = event.params.paymentToken;
   registration.referrer = event.params.referrer;
   // newExpiry is the contract's absolute expiry, not a duration delta.
-  registration.expiryDate = event.params.newExpiry;
+  registration.expiryDate = clampLegacyExpiry(event.params.newExpiry);
   registration.save();
 }
 

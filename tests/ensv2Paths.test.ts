@@ -15,6 +15,7 @@ import {
   test,
 } from "matchstick-as/assembly/index";
 import {
+  handleExpiryUpdated,
   handleLabelRegistered,
   handleLabelUnregistered,
   handleResolverUpdated,
@@ -38,6 +39,7 @@ import {
   Linked,
 } from "../src/types/PermissionedResolver/PermissionedResolver";
 import {
+  ExpiryUpdated,
   LabelRegistered,
   LabelUnregistered,
   ResolverUpdated,
@@ -100,7 +102,8 @@ const createLabelRegisteredEvent = (
   tokenId: BigInt,
   labelHash: Bytes,
   label: string,
-  owner: string = OWNER
+  owner: string = OWNER,
+  expiry: BigInt = BigInt.fromI32(2000000000)
 ): LabelRegistered => {
   let mockEvent = newMockEvent();
   let event = new LabelRegistered(
@@ -139,7 +142,45 @@ const createLabelRegisteredEvent = (
   event.parameters.push(
     new ethereum.EventParam(
       "expiry",
-      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(2000000000))
+      ethereum.Value.fromUnsignedBigInt(expiry)
+    )
+  );
+  event.parameters.push(
+    new ethereum.EventParam(
+      "sender",
+      ethereum.Value.fromAddress(Address.fromString(SENDER))
+    )
+  );
+  return event;
+};
+
+const createExpiryUpdatedEvent = (
+  registryAddress: string,
+  tokenId: BigInt,
+  newExpiry: BigInt
+): ExpiryUpdated => {
+  let mockEvent = newMockEvent();
+  let event = new ExpiryUpdated(
+    Address.fromString(registryAddress),
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam(
+      "tokenId",
+      ethereum.Value.fromUnsignedBigInt(tokenId)
+    )
+  );
+  event.parameters.push(
+    new ethereum.EventParam(
+      "newExpiry",
+      ethereum.Value.fromUnsignedBigInt(newExpiry)
     )
   );
   event.parameters.push(
@@ -1505,4 +1546,78 @@ test("unregister decrements and re-registration restores the legacy parent's sub
     createLabelUnregisteredEvent(ROOT_REGISTRY, slotToken(1))
   );
   assert.fieldEquals("Domain", ethPathId, "subdomainCount", "4");
+});
+
+test("never-expiring ENSv2 slots (uint64 max) clamp legacy Domain/Registration expiry to the max supported timestamp, native slot keeps the raw value", () => {
+  dataSourceMock.setNetwork("sepolia");
+
+  const UINT64_MAX = BigInt.fromString("18446744073709551615");
+  const MAX_LEGACY = "8640000000000";
+
+  let ethLabelHash = Bytes.fromByteArray(
+    crypto.keccak256(ByteArray.fromUTF8("eth"))
+  );
+  handleLabelRegistered(
+    createLabelRegisteredEvent(ROOT_REGISTRY, slotToken(1), ethLabelHash, "eth")
+  );
+  handleSubregistryUpdated(
+    createSubregistryUpdatedEvent(ROOT_REGISTRY, slotToken(1), ETH_REGISTRY)
+  );
+  let ethPathId = pathNamehash(
+    Bytes.fromHexString(ROOT_NAMEHASH),
+    ethLabelHash
+  ).toHexString();
+
+  // Registration path: uint64 max + grace must not overflow or leak through.
+  let foreverHash = Bytes.fromI32(82);
+  let foreverPathId = pathNamehash(
+    Bytes.fromHexString(ethPathId),
+    foreverHash
+  ).toHexString();
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ETH_REGISTRY,
+      slotToken(1),
+      foreverHash,
+      "forever",
+      OWNER,
+      UINT64_MAX
+    )
+  );
+  assert.fieldEquals("Domain", foreverPathId, "expiryDate", MAX_LEGACY);
+  assert.fieldEquals("Registration", foreverHash.toHexString(), "expiryDate", MAX_LEGACY);
+  assert.fieldEquals(
+    "ENSv2NameSlot",
+    slotIdFor(ETH_REGISTRY, 1),
+    "expiryDate",
+    UINT64_MAX.toString()
+  );
+
+  // Renewal path: an ordinary name extended to "never".
+  let laterHash = Bytes.fromI32(83);
+  let laterPathId = pathNamehash(
+    Bytes.fromHexString(ethPathId),
+    laterHash
+  ).toHexString();
+  handleLabelRegistered(
+    createLabelRegisteredEvent(ETH_REGISTRY, slotToken(2), laterHash, "later")
+  );
+  assert.fieldEquals("Domain", laterPathId, "expiryDate", "2002419200");
+  handleExpiryUpdated(
+    createExpiryUpdatedEvent(ETH_REGISTRY, slotToken(2), UINT64_MAX)
+  );
+  assert.fieldEquals("Domain", laterPathId, "expiryDate", MAX_LEGACY);
+  assert.fieldEquals("Registration", laterHash.toHexString(), "expiryDate", MAX_LEGACY);
+  assert.fieldEquals(
+    "ENSv2NameSlot",
+    slotIdFor(ETH_REGISTRY, 2),
+    "expiryDate",
+    UINT64_MAX.toString()
+  );
+
+  // Values below the cap are untouched.
+  handleExpiryUpdated(
+    createExpiryUpdatedEvent(ETH_REGISTRY, slotToken(2), BigInt.fromI32(2100000000))
+  );
+  assert.fieldEquals("Domain", laterPathId, "expiryDate", "2102419200");
 });

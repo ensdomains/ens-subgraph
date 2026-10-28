@@ -913,6 +913,42 @@ describe("BaseRegistrar's own NameRenewed/Transfer, and LegacyEthRegistrarContro
     );
   });
 
+  test("renewal to (near) uint64 max, as the Graveyard does for parked migrated names, clamps Domain/Registration expiry to the max supported timestamp", () => {
+    const labelhash =
+      "0x6c5d5b0a5a3b0d1a9f1d0ecb49d8b0f2f6d4d0d9b7c8a6e5f4a3b2c1d0e9f8a7";
+    const labelhashAsInt =
+      "49014732762036582799472617395683540772314031190514023815906079271141442713767";
+
+    handleNewOwner(
+      createNewOwnerEvent(ETH_NODE.toHexString(), labelhash, DEFAULT_OWNER)
+    );
+    handleNameRegistered(
+      createNameRegisteredEventForBaseRegistrar(
+        labelhashAsInt,
+        DEFAULT_OWNER,
+        "1610000000"
+      )
+    );
+    let domainId = Bytes.fromByteArray(
+      crypto.keccak256(concat(ETH_NODE, Bytes.fromHexString(labelhash)))
+    );
+
+    // Graveyard.renew: uint64.max - block.timestamp - GRACE_PERIOD, so the
+    // registrar's `expires` lands at uint64.max - 90 days.
+    handleNameRenewed(
+      createNameRenewedEvent(labelhashAsInt, "18446744073701775615")
+    );
+
+    let fetchedRegistration = Registration.load(labelhash)!;
+    assert.assertTrue(
+      fetchedRegistration.expiryDate.equals(BigInt.fromString("8640000000000"))
+    );
+    let fetchedDomain = Domain.load(domainId.toHexString())!;
+    assert.assertTrue(
+      fetchedDomain.expiryDate!.equals(BigInt.fromString("8640000000000"))
+    );
+  });
+
   test("handleNameTransferred updates Registration/Domain registrant, writes history, and no-ops for an unregistered tokenId", () => {
     const labelhash =
       "0xe1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1";
