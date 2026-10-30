@@ -3,6 +3,14 @@
 Version labels match the Subgraph Studio deployments of the mainnet subgraph
 `5XqPmWe6gjyrJtFn9cLy237i4cWw2j9HcUJEXsP5qGtH`.
 
+## Unreleased
+
+- Refresh `WrappedDomain.expiryDate` when a wrapped `.eth` name is renewed
+  through the BaseRegistrar. The NameWrapper normalises its expiry on read
+  (registrar expiry + 90 days) without emitting `ExpiryExtended`, so the
+  subgraph value went stale after every such renewal: 75,043 wrapped names
+  were affected on mainnet at 2026-10-30 (#89).
+
 ## v2.0.2 (2026-10-30)
 
 - Classify registries deployed against the ENS app's mainnet

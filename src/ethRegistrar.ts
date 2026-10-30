@@ -219,6 +219,16 @@ export function handleNameRenewed(event: NameRenewedEvent): void {
   registration.save();
   domain.save();
 
+  // A wrapped .eth 2LD renewed through the BaseRegistrar emits no
+  // NameWrapper ExpiryExtended event: the wrapper normalises its expiry on
+  // read (registrar expiry + GRACE_PERIOD, see NameWrapper.getData). Mirror
+  // that here so WrappedDomain.expiryDate does not go stale (#89).
+  let wrappedDomain = WrappedDomain.load(domainId);
+  if (wrappedDomain != null) {
+    wrappedDomain.expiryDate = domain.expiryDate!;
+    wrappedDomain.save();
+  }
+
   let registrationEvent = new NameRenewed(createLegacyEventID(event));
   registrationEvent.registration = registration.id;
   registrationEvent.blockNumber = event.block.number.toI32();

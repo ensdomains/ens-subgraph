@@ -26,7 +26,9 @@ import {
   NameRegistered as LegacyNameRegistered,
   NameRenewed as LegacyNameRenewed,
 } from "../src/types/LegacyEthRegistrarController/LegacyEthRegistrarController";
-import { Domain, Registration } from "../src/types/schema";
+import { Domain, Registration ,
+  WrappedDomain,
+} from "../src/types/schema";
 import {
   NameRegistered as UnwrappedEthRegistrarController_NameRegistered,
   NameRenewed as UnwrappedEthRegistrarController_NameRenewed,
@@ -947,6 +949,42 @@ describe("BaseRegistrar's own NameRenewed/Transfer, and LegacyEthRegistrarContro
     assert.assertTrue(
       fetchedDomain.expiryDate!.equals(BigInt.fromString("8640000000000"))
     );
+  });
+
+  test("renewal of a wrapped .eth name through the BaseRegistrar also refreshes WrappedDomain.expiryDate (#89)", () => {
+    const labelhash =
+      "0x7a1c3f9b2e4d6c8a0b5e7f9d1c3a5b7d9e1f3a5c7b9d1e3f5a7c9b1d3e5f7a9c";
+    const labelhashAsInt =
+      "55232078238660091151951310067410837771020824850170498950951524275750789151388";
+
+    handleNewOwner(
+      createNewOwnerEvent(ETH_NODE.toHexString(), labelhash, DEFAULT_OWNER)
+    );
+    handleNameRegistered(
+      createNameRegisteredEventForBaseRegistrar(
+        labelhashAsInt,
+        DEFAULT_OWNER,
+        "1610000000"
+      )
+    );
+    let domainId = Bytes.fromByteArray(
+      crypto.keccak256(concat(ETH_NODE, Bytes.fromHexString(labelhash)))
+    ).toHexString();
+
+    // Wrapped at the original expiry (+90d), as NameWrapped would record.
+    let wrappedDomain = new WrappedDomain(domainId);
+    wrappedDomain.domain = domainId;
+    wrappedDomain.owner = DEFAULT_OWNER;
+    wrappedDomain.fuses = 196608;
+    wrappedDomain.expiryDate = BigInt.fromString("1617776000");
+    wrappedDomain.save();
+
+    handleNameRenewed(createNameRenewedEvent(labelhashAsInt, "1700000000"));
+
+    // 1700000000 + 90d
+    assert.fieldEquals("Domain", domainId, "expiryDate", "1707776000");
+    assert.fieldEquals("WrappedDomain", domainId, "expiryDate", "1707776000");
+    assert.fieldEquals("Registration", labelhash, "expiryDate", "1700000000");
   });
 
   test("handleNameTransferred updates Registration/Domain registrant, writes history, and no-ops for an unregistered tokenId", () => {
