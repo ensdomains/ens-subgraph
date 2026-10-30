@@ -1,6 +1,6 @@
 {
   "name": "ens-subgraph",
-  "version": "1.0.2",
+  "version": "2.0.2",
   "repository": "https://github.com/ensdomains/ens-subgraph",
   "license": "MIT",
   "scripts": {
