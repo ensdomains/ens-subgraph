@@ -5,6 +5,11 @@ Version labels match the Subgraph Studio deployments of the mainnet subgraph
 
 ## Unreleased
 
+- `Account.ensv2PrimaryNames`: derived link from an account to its ENSIP-19
+  default primary name (#25, #38).
+- README: self-hosting notes (graph-node version, `ens_names` rainbow table
+  for ENSv1 subname labels, duplicate log-index RPCs, pruning) (#62, #30,
+  #77, #68).
 - Refresh `WrappedDomain.expiryDate` when a wrapped `.eth` name is renewed
   through the BaseRegistrar. The NameWrapper normalises its expiry on read
   (registrar expiry + 90 days) without emitting `ExpiryExtended`, so the

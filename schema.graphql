@@ -280,6 +280,8 @@ type Account @entity(immutable: false) {
   ensv2Slots: [ENSv2NameSlot!]! @derivedFrom(field: "owner")
   "The ENSv2 tokens currently owned by the account"
   ensv2Tokens: [ENSv2Token!]! @derivedFrom(field: "owner")
+  "The account's ENSIP-19 default primary name (at most one; keyed by address). Forward-verify before trusting it."
+  ensv2PrimaryNames: [ENSv2PrimaryName!]! @derivedFrom(field: "account")
   "The ENSv2 registrations currently owned by the account"
   ensv2Registrations: [ENSv2Registration!]! @derivedFrom(field: "owner")
 }

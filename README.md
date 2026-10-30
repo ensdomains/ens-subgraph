@@ -17,6 +17,27 @@ yarn deploy:sepolia <studio-subgraph-name> \
 
 The Studio subgraph name and version label are deliberately explicit rather than repository-wide constants. A failed command removes its temporary manifest as well.
 
+## Self-hosting notes
+
+- **graph-node >= 0.38** is required (`specVersion: 1.3.0`, `apiVersion: 0.0.9`).
+- **Labels for ENSv1 subnames come from graph-node's rainbow table.** ENSv1 registry
+  events only carry label *hashes*; `labelName`/`name` are filled through
+  `ens.nameByHash`, which reads graph-node's `ens_names` table. If that table is
+  empty (the default on a fresh node, and incomplete on most indexers) subnames
+  appear as `[<labelhash>].parent.eth` with `labelName: null`, and newer
+  graph-node versions log `ens_name_by_hash is deprecated`. Load the
+  [ens-rainbow](https://github.com/graphprotocol/ens-rainbow) dump into
+  `ens_names` before syncing. `.eth` second-level names are unaffected (the
+  registrar controllers emit the plain label), and so are all ENSv2 names:
+  `LabelRegistered` carries the label, so ENSv2 slots and their projected
+  `Domain` rows are always labelled.
+- **Event IDs are `<block>-<logIndex>`** for the ENSv1 event entities and are kept
+  stable for consumers. An RPC that returns duplicate log indexes within a block
+  (reported with Erigon) makes two events collide and aborts the sync; index from
+  a client that returns consecutive log indexes.
+- **Pruning is on** (`indexerHints: prune: auto`): time-travel queries
+  (`block: { number }`) are only served for recent blocks.
+
 # Example Queries (ENSv1 — `Domain`/`Registration`/`Resolver`)
 
 Here we have example queries, so that you don't have to type them in yourself eachtime in the graphiql playground:
