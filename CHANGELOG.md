@@ -3,7 +3,7 @@
 Version labels match the Subgraph Studio deployments of the mainnet subgraph
 `5XqPmWe6gjyrJtFn9cLy237i4cWw2j9HcUJEXsP5qGtH`.
 
-## Unreleased
+## v2.0.3 (2026-10-30)
 
 - `Account.ensv2PrimaryNames`: derived link from an account to its ENSIP-19
   default primary name (#25, #38).
