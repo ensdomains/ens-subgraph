@@ -4,7 +4,7 @@
 // Unknown networks fail loudly because these values participate in entity-ID
 // construction and contract classification; zero-value fallbacks would
 // silently corrupt indexed state.
-import { Address, BigInt, dataSource, log } from "@graphprotocol/graph-ts";
+import { Address, BigInt, Bytes, dataSource, log } from "@graphprotocol/graph-ts";
 
 export function getMigrationControllers(): Address[] {
   let network = dataSource.network();
@@ -111,6 +111,36 @@ export function getUserRegistryImplAddress(): Address {
     [network]
   );
   return Address.zero();
+}
+
+// Further implementations that VerifiableFactory proxies may point at and
+// that must still classify as USER. The canonical artifact address above is
+// what `yarn validate` checks; these are implementations observed on-chain
+// that the deployment records do not (yet) list. Mainnet: the ENS app and
+// ENSjs deploy user registries against 0xC927bCaA… (first seen at block
+// 26288738, 286 proxies by 2026-10-30), while namechain's addresses.md still
+// records 0xfaa23592… (960 proxies). Both are live, so both count.
+export function getAdditionalUserRegistryImplAddresses(): Address[] {
+  let network = dataSource.network();
+  if (network == "mainnet") {
+    return [
+      Address.fromString("0xC927bCaA77cd7bE283518760896Be0CF3Cfbe08d"), // UserRegistryImpl used by the ENS app / ENSjs
+    ];
+  }
+  return [];
+}
+
+export function isUserRegistryImpl(implementation: Bytes): boolean {
+  if (implementation.equals(getUserRegistryImplAddress())) {
+    return true;
+  }
+  let extra = getAdditionalUserRegistryImplAddresses();
+  for (let i = 0; i < extra.length; i++) {
+    if (implementation.equals(extra[i])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function getWrapperRegistryImplAddress(): Address {

@@ -9,8 +9,8 @@ import {
   getPermissionedResolverImplAddress,
   getRootRegistryAddress,
   getStandaloneHCAImplAddress,
-  getUserRegistryImplAddress,
   getWrapperRegistryImplAddress,
+  isUserRegistryImpl,
 } from "./ensv2Constants";
 import { ENSv2HCA, ENSv2Namespace, ENSv2Registry } from "./types/schema";
 import { ProxyDeployed } from "./types/VerifiableFactory/VerifiableFactory";
@@ -44,7 +44,7 @@ export function kindForAddress(
     return "ETH";
   }
   if (implementation) {
-    if (implementation.equals(getUserRegistryImplAddress())) {
+    if (isUserRegistryImpl(implementation)) {
       return "USER";
     }
     if (implementation.equals(getWrapperRegistryImplAddress())) {
