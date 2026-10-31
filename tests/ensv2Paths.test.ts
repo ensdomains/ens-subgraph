@@ -1552,7 +1552,7 @@ test("never-expiring ENSv2 slots (uint64 max) clamp legacy Domain/Registration e
   dataSourceMock.setNetwork("sepolia");
 
   const UINT64_MAX = BigInt.fromString("18446744073709551615");
-  const MAX_LEGACY = "8640000000000";
+  const MAX_LEGACY = "253402300799";
 
   let ethLabelHash = Bytes.fromByteArray(
     crypto.keccak256(ByteArray.fromUTF8("eth"))

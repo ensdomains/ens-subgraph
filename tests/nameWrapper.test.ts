@@ -674,8 +674,8 @@ describe("handleExpiryExtended with uint64 max (Graveyard-parked migrated names)
     const event = createExpiryExtendedEvent(node, UINT64_MAX);
     handleExpiryExtended(event);
 
-    assert.fieldEquals("WrappedDomain", node, "expiryDate", "8640000000000");
-    assert.fieldEquals("Domain", node, "expiryDate", "8640000000000");
+    assert.fieldEquals("WrappedDomain", node, "expiryDate", "253402300799");
+    assert.fieldEquals("Domain", node, "expiryDate", "253402300799");
     let eventId = createLegacyEventID(event);
     assert.fieldEquals("ExpiryExtended", eventId, "expiryDate", UINT64_MAX.toString());
   });

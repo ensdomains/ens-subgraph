@@ -943,11 +943,11 @@ describe("BaseRegistrar's own NameRenewed/Transfer, and LegacyEthRegistrarContro
 
     let fetchedRegistration = Registration.load(labelhash)!;
     assert.assertTrue(
-      fetchedRegistration.expiryDate.equals(BigInt.fromString("8640000000000"))
+      fetchedRegistration.expiryDate.equals(BigInt.fromString("253402300799"))
     );
     let fetchedDomain = Domain.load(domainId.toHexString())!;
     assert.assertTrue(
-      fetchedDomain.expiryDate!.equals(BigInt.fromString("8640000000000"))
+      fetchedDomain.expiryDate!.equals(BigInt.fromString("253402300799"))
     );
   });
 

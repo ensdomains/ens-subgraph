@@ -34,13 +34,15 @@ export const EMPTY_ADDRESS = "0x0000000000000000000000000000000000000000";
 // TLDs, the reverse mirror, migrated emancipated subnames with
 // CAN_EXTEND_EXPIRY, and Graveyard-parked v1 names renewed to the cap), and
 // consumers that turn expiryDate into a timestamp cannot represent that:
-// JavaScript Date overflows past 8.64e15 ms and PostgreSQL to_timestamp
-// fails with "timestamp out of range". 8640000000000 s (13 Sep 275760) is
-// the JavaScript Date maximum, which also fits int64 and PostgreSQL, so a
-// never-expiring name reads as the furthest future instant consumers can
-// hold. Native ENSv2 entities and the ENSv1 event entities keep the raw
-// on-chain value.
-export const MAX_LEGACY_EXPIRY = BigInt.fromString("8640000000000");
+// JavaScript Date overflows past 8.64e15 ms, PostgreSQL to_timestamp fails
+// with "timestamp out of range", and Rust's chrono stops at year 262142
+// (v2.1.0's clamp, the JavaScript Date maximum in year 275760, still
+// panicked Rust consumers such as Blockscout's BENS). 253402300799 s is
+// 9999-12-31T23:59:59Z, the last instant of a four-digit ISO 8601 date, which
+// every mainstream date type can hold, so a never-expiring name reads as the
+// furthest future instant consumers can agree on. Native ENSv2 entities and
+// the ENSv1 event entities keep the raw on-chain value.
+export const MAX_LEGACY_EXPIRY = BigInt.fromString("253402300799");
 
 export function clampLegacyExpiry(expiry: BigInt): BigInt {
   return expiry.gt(MAX_LEGACY_EXPIRY) ? MAX_LEGACY_EXPIRY : expiry;

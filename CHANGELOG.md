@@ -3,6 +3,18 @@
 Version labels match the Subgraph Studio deployments of the mainnet subgraph
 `5XqPmWe6gjyrJtFn9cLy237i4cWw2j9HcUJEXsP5qGtH`.
 
+## v2.1.1 (2026-10-31)
+
+### Fixed
+
+- The "never expires" clamp on `Domain`, `Registration` and `WrappedDomain`
+  `expiryDate` is now `253402300799` (9999-12-31T23:59:59Z) instead of
+  `8640000000000` (13 Sep 275760, the JavaScript `Date` maximum). The old
+  value fits PostgreSQL but not Rust's `chrono` (max year 262142), so Rust
+  consumers decoding it as a timestamp panicked (Blockscout's BENS). Year
+  9999 is representable by every mainstream date type. Native ENSv2 entities
+  and event entities still carry the raw on-chain value.
+
 ## v2.1.0 (2026-10-31)
 
 ### Fixed
