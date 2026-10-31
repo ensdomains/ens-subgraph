@@ -38,6 +38,40 @@ export function isMigrationController(sender: Address): boolean {
   return false;
 }
 
+// The ENSv2 migration parks retired ENSv1 state (registry owner, BaseRegistrar
+// token) in the Graveyard. A registry NewOwner/Transfer to it is the
+// migration's v1 voiding step, not a real change of control. Returned as a
+// list (empty for unknown networks) so callers never compare a nullable
+// Address: Bytes overloads ==/!=, and a null comparison crashes the
+// AssemblyScript compiler (compileBinaryOverload).
+export function getGraveyardAddresses(): Address[] {
+  let network = dataSource.network();
+  if (network == "mainnet") {
+    return [
+      Address.fromString("0xda021a2c1c2f99574d861ef8c6fa745851beb7f6"),
+    ];
+  }
+  if (network == "sepolia") {
+    return [
+      Address.fromString("0xb58a90a39d13cce1d0e192b5da5c47640855b04d"),
+    ];
+  }
+  return [];
+}
+
+// True for the Graveyard and the migration controllers: ENSv1 ownership
+// moving to one of these is part of a migration, whose legacy wrapped state
+// is kept and corrected by correctMigratedLegacyOwner.
+export function isMigrationDestination(address: Address): boolean {
+  let graveyards = getGraveyardAddresses();
+  for (let i = 0; i < graveyards.length; i++) {
+    if (graveyards[i].equals(address)) {
+      return true;
+    }
+  }
+  return isMigrationController(address);
+}
+
 export function getV2GracePeriod(): BigInt {
   // GRACE_PERIOD is an ETHRegistrar *constructor argument*, not a compiled-in
   // protocol constant (contracts-v2/contracts/src/registrar/ETHRegistrar.sol)

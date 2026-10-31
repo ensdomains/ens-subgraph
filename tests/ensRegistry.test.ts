@@ -2,6 +2,7 @@ import { Address, BigInt, Bytes, crypto, ethereum } from "@graphprotocol/graph-t
 import {
   assert,
   beforeAll,
+  dataSourceMock,
   newMockEvent,
   test,
 } from "matchstick-as/assembly/index";
@@ -21,7 +22,7 @@ import {
   NewTTL,
   Transfer,
 } from "../src/types/ENSRegistry/EnsRegistry";
-import { Domain } from "../src/types/schema";
+import { Domain, WrappedDomain } from "../src/types/schema";
 import { concat, createLegacyEventID, ROOT_NODE } from "../src/utils";
 
 const ETH_NAMEHASH =
@@ -480,4 +481,121 @@ test("handleTransferOldRegistry processes a non-migrated domain but skips an alr
     "owner",
     Address.fromString(DEFAULT_OWNER).toHexString()
   );
+});
+
+// --- wrapped names leaving the NameWrapper through the registry ---
+
+const NAME_WRAPPER = "0xD4416b13d2b3a9aBae7AcD5D6C2BbDBE25686401";
+const MAINNET_GRAVEYARD = "0xda021a2c1c2f99574d861ef8c6fa745851beb7f6";
+const WRAPPED_HOLDER = "0x7c9e45243f0c67841ece2bfb160ae2721535a5e9";
+const NODE_WRAPPED_TRANSFER =
+  "0x1111111111111111111111111111111111111111111111111111111111111111";
+const NODE_WRAPPED_GRAVEYARD =
+  "0x2222222222222222222222222222222222222222222222222222222222222222";
+const NODE_WRAPPED_NEWOWNER_LABEL =
+  "0x3333333333333333333333333333333333333333333333333333333333333333";
+
+function seedWrappedDomain(node: string): void {
+  let domain = new Domain(node);
+  domain.owner = Address.fromString(NAME_WRAPPER).toHexString();
+  domain.wrappedOwner = Address.fromString(WRAPPED_HOLDER).toHexString();
+  domain.isMigrated = true;
+  domain.subdomainCount = 0;
+  domain.createdAt = BigInt.fromI32(0);
+  domain.save();
+
+  let wrappedDomain = new WrappedDomain(node);
+  wrappedDomain.domain = node;
+  wrappedDomain.expiryDate = BigInt.fromI32(2000000000);
+  wrappedDomain.fuses = 0;
+  wrappedDomain.owner = Address.fromString(WRAPPED_HOLDER).toHexString();
+  wrappedDomain.save();
+}
+
+test("handleTransfer moving a wrapped name away from the NameWrapper clears wrappedOwner and removes the WrappedDomain", () => {
+  dataSourceMock.setNetwork("mainnet");
+  seedWrappedDomain(NODE_WRAPPED_TRANSFER);
+
+  const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+  handleTransfer(createTransferEvent(NODE_WRAPPED_TRANSFER, newOwner));
+
+  assert.fieldEquals(
+    "Domain",
+    NODE_WRAPPED_TRANSFER,
+    "owner",
+    Address.fromString(newOwner).toHexString()
+  );
+  assert.fieldEquals("Domain", NODE_WRAPPED_TRANSFER, "wrappedOwner", "null");
+  assert.notInStore("WrappedDomain", NODE_WRAPPED_TRANSFER);
+});
+
+test("handleTransfer to the NameWrapper itself (wrap in progress) leaves wrapped state alone", () => {
+  dataSourceMock.setNetwork("mainnet");
+  seedWrappedDomain(NODE_WRAPPED_TRANSFER);
+
+  handleTransfer(createTransferEvent(NODE_WRAPPED_TRANSFER, NAME_WRAPPER));
+
+  assert.fieldEquals(
+    "Domain",
+    NODE_WRAPPED_TRANSFER,
+    "wrappedOwner",
+    Address.fromString(WRAPPED_HOLDER).toHexString()
+  );
+  assert.fieldEquals(
+    "WrappedDomain",
+    NODE_WRAPPED_TRANSFER,
+    "owner",
+    Address.fromString(WRAPPED_HOLDER).toHexString()
+  );
+});
+
+test("handleTransfer to the ENSv2 Graveyard (migration voiding step) keeps the wrapped state for correctMigratedLegacyOwner", () => {
+  dataSourceMock.setNetwork("mainnet");
+  seedWrappedDomain(NODE_WRAPPED_GRAVEYARD);
+
+  handleTransfer(createTransferEvent(NODE_WRAPPED_GRAVEYARD, MAINNET_GRAVEYARD));
+
+  assert.fieldEquals("Domain", NODE_WRAPPED_GRAVEYARD, "owner", MAINNET_GRAVEYARD);
+  assert.fieldEquals(
+    "Domain",
+    NODE_WRAPPED_GRAVEYARD,
+    "wrappedOwner",
+    Address.fromString(WRAPPED_HOLDER).toHexString()
+  );
+  assert.fieldEquals(
+    "WrappedDomain",
+    NODE_WRAPPED_GRAVEYARD,
+    "owner",
+    Address.fromString(WRAPPED_HOLDER).toHexString()
+  );
+});
+
+test("handleNewOwner from the parent (setSubnodeOwner on a non-emancipated wrapped subname) clears the wrapped state", () => {
+  dataSourceMock.setNetwork("mainnet");
+  // Subname of ROOT_NODE so the parent Domain exists (see the old-registry
+  // test above for why); the node is keccak256(parent ++ label).
+  let subnode = Bytes.fromByteArray(
+    crypto.keccak256(
+      concat(ROOT_NODE, Bytes.fromHexString(NODE_WRAPPED_NEWOWNER_LABEL))
+    )
+  ).toHexString();
+  seedWrappedDomain(subnode);
+
+  const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+  handleNewOwner(
+    createNewOwnerEvent(
+      ROOT_NODE.toHexString(),
+      NODE_WRAPPED_NEWOWNER_LABEL,
+      newOwner
+    )
+  );
+
+  assert.fieldEquals(
+    "Domain",
+    subnode,
+    "owner",
+    Address.fromString(newOwner).toHexString()
+  );
+  assert.fieldEquals("Domain", subnode, "wrappedOwner", "null");
+  assert.notInStore("WrappedDomain", subnode);
 });

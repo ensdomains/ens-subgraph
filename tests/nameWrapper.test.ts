@@ -406,7 +406,42 @@ describe("handleExpiryExtended", () => {
   });
 });
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 describe("handleTransferSingle / handleTransferBatch", () => {
+  test("handleTransferSingle of a detached token (name no longer wrapped) writes history only", () => {
+    const tokenId = BigInt.fromI32(333444555);
+    const node =
+      "0x0000000000000000000000000000000000000000000000000000000013dff5cb";
+
+    // The registry moved this name away from the NameWrapper earlier
+    // (parent setSubnodeOwner / registrar reclaim), which cleared the
+    // wrapped state. The ERC-1155 token still exists and can be transferred.
+    let domain = new Domain(node);
+    domain.owner = DEFAULT_OWNER;
+    domain.isMigrated = true;
+    domain.subdomainCount = 0;
+    domain.createdAt = BigInt.fromI32(0);
+    domain.save();
+
+    const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+    const event = createTransferSingleEvent(DEFAULT_OWNER, newOwner, tokenId);
+    handleTransferSingle(event);
+
+    assert.notInStore("WrappedDomain", node);
+    // Never set on this row, so it is absent from the store rather than
+    // "null": check through the entity.
+    assert.assertNull(Domain.load(node)!.wrappedOwner);
+    assert.fieldEquals("Domain", node, "owner", DEFAULT_OWNER);
+    let eventId = createLegacyEventID(event).concat("-0");
+    assert.fieldEquals(
+      "WrappedTransfer",
+      eventId,
+      "owner",
+      Address.fromString(newOwner).toHexString()
+    );
+  });
+
   test("handleTransferSingle creates a placeholder WrappedDomain, sets domain.wrappedOwner, and writes history", () => {
     const tokenId = BigInt.fromI32(111222333);
     const node =
@@ -420,7 +455,8 @@ describe("handleTransferSingle / handleTransferBatch", () => {
     domain.save();
 
     const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
-    const event = createTransferSingleEvent(DEFAULT_OWNER, newOwner, tokenId);
+    // A fresh wrap mints the token: from is the zero address.
+    const event = createTransferSingleEvent(ZERO_ADDRESS, newOwner, tokenId);
     handleTransferSingle(event);
 
     assert.fieldEquals(
@@ -521,7 +557,7 @@ describe("handleTransferSingle / handleTransferBatch", () => {
     domainB.save();
 
     const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
-    const event = createTransferBatchEvent(DEFAULT_OWNER, newOwner, [
+    const event = createTransferBatchEvent(ZERO_ADDRESS, newOwner, [
       tokenIdA,
       tokenIdB,
     ]);
@@ -581,7 +617,7 @@ describe("handleTransferSingle / handleTransferBatch", () => {
     existingWrappedDomain.save();
 
     const newOwner = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
-    const event = createTransferBatchEvent(DEFAULT_OWNER, newOwner, [
+    const event = createTransferBatchEvent(ZERO_ADDRESS, newOwner, [
       freshTokenId,
       existingTokenId,
     ]);

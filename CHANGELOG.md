@@ -3,6 +3,15 @@
 Version labels match the Subgraph Studio deployments of the mainnet subgraph
 `5XqPmWe6gjyrJtFn9cLy237i4cWw2j9HcUJEXsP5qGtH`.
 
+## Unreleased
+
+### Fixed
+
+- `Domain.wrappedOwner` and the `WrappedDomain` entity are now cleared when a wrapped name leaves the NameWrapper without a `NameUnwrapped` event (replaces #78):
+  - a registry `NewOwner` / `Transfer` that moves the name away from the NameWrapper (parent `setSubnodeOwner` on a subname without `PARENT_CANNOT_CONTROL`, `BaseRegistrar.reclaim`);
+  - a native ENSv2 `.eth` registration of a name whose ENSv1 wrapped registration had expired (expiry emits no event on either contract).
+  Moves to the ENSv2 Graveyard or a migration controller are the migration's voiding step and keep their wrapped state for `correctMigratedLegacyOwner`. A NameWrapper `TransferSingle` / `TransferBatch` of a token whose name carries no wrapped state (a detached token) now writes only the `WrappedTransfer` history row instead of reviving `wrappedOwner`. On mainnet 509 names were affected at the time of the fix.
+
 ## v2.0.3 (2026-10-30)
 
 - `Account.ensv2PrimaryNames`: derived link from an account to its ENSIP-19

@@ -33,6 +33,7 @@ import {
   createLegacyEventID,
   createOrLoadAccount,
   createOrLoadDomain,
+  EMPTY_ADDRESS_BYTEARRAY,
   ETH_NODE,
   uint256ToByteArray,
 } from "./utils";
@@ -153,7 +154,11 @@ export function handleNameUnwrapped(event: NameUnwrappedEvent): void {
   nameUnwrappedEvent.transactionID = transactionID;
   nameUnwrappedEvent.save();
 
-  store.remove("WrappedDomain", node.toHexString());
+  // Already gone when the registry Transfer that precedes NameUnwrapped
+  // detached the wrapped state (ensRegistry.detachWrappedStateIfLeftWrapper).
+  if (WrappedDomain.load(node.toHexString()) != null) {
+    store.remove("WrappedDomain", node.toHexString());
+  }
 }
 
 export function handleFusesSet(event: FusesSetEvent): void {
@@ -214,6 +219,7 @@ function makeWrappedTransfer(
   transactionID: Bytes,
   eventID: string,
   node: BigInt,
+  from: Bytes,
   to: Bytes
 ): void {
   const _to = createOrLoadAccount(to);
@@ -223,6 +229,26 @@ function makeWrappedTransfer(
   const namehash = Bytes.fromByteArray(uint256ToByteArray(node));
   const domain = createOrLoadDomain(namehash);
   let wrappedDomain = WrappedDomain.load(namehash.toHexString());
+  // A transfer (not a mint from 0x0) of a token whose name carries no wrapped
+  // state moves a detached ERC-1155 token: the name left the NameWrapper
+  // through the registry (see ensRegistry.detachWrappedStateIfLeftWrapper) or
+  // was re-registered after expiry. Keep the history row, do not revive the
+  // wrapped state.
+  // (.equals() kept out of compound conditions: AssemblyScript's
+  // compileBinaryOverload crashes on it, see handleNameUnwrapped.)
+  let isMint = from.equals(EMPTY_ADDRESS_BYTEARRAY);
+  if (!isMint && wrappedDomain == null) {
+    if (!domain.wrappedOwner) {
+      saveWrappedTransfer(
+        eventID,
+        domain.id,
+        blockNumber,
+        transactionID,
+        _to.id
+      );
+      return;
+    }
+  }
   // new registrations emit the Transfer` event before the NameWrapped event
   // so we need to create the WrappedDomain entity here
   if (wrappedDomain == null) {
@@ -237,11 +263,21 @@ function makeWrappedTransfer(
   wrappedDomain.save();
   domain.wrappedOwner = _to.id;
   domain.save();
+  saveWrappedTransfer(eventID, domain.id, blockNumber, transactionID, _to.id);
+}
+
+function saveWrappedTransfer(
+  eventID: string,
+  domainId: string,
+  blockNumber: i32,
+  transactionID: Bytes,
+  ownerId: string
+): void {
   const wrappedTransfer = new WrappedTransfer(eventID);
-  wrappedTransfer.domain = domain.id;
+  wrappedTransfer.domain = domainId;
   wrappedTransfer.blockNumber = blockNumber;
   wrappedTransfer.transactionID = transactionID;
-  wrappedTransfer.owner = _to.id;
+  wrappedTransfer.owner = ownerId;
   wrappedTransfer.save();
 }
 
@@ -251,6 +287,7 @@ export function handleTransferSingle(event: TransferSingleEvent): void {
     event.transaction.hash,
     createLegacyEventID(event).concat("-0"),
     event.params.id,
+    event.params.from,
     event.params.to
   );
 }
@@ -259,6 +296,7 @@ export function handleTransferBatch(event: TransferBatchEvent): void {
   let blockNumber = event.block.number.toI32();
   let transactionID = event.transaction.hash;
   let ids = event.params.ids;
+  let from = event.params.from;
   let to = event.params.to;
   for (let i = 0; i < ids.length; i++) {
     makeWrappedTransfer(
@@ -266,6 +304,7 @@ export function handleTransferBatch(event: TransferBatchEvent): void {
       transactionID,
       createLegacyEventID(event).concat("-").concat(i.toString()),
       ids[i],
+      from,
       to
     );
   }

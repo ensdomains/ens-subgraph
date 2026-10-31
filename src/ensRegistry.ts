@@ -1,5 +1,5 @@
 // Import types and APIs from graph-ts
-import { BigInt, Bytes, crypto, ens } from "@graphprotocol/graph-ts";
+import { Address, BigInt, Bytes, crypto, ens, store } from "@graphprotocol/graph-ts";
 
 import {
   checkValidLabel,
@@ -29,9 +29,11 @@ import {
   NewTTL,
   Resolver,
   Transfer,
+  WrappedDomain,
 } from "./types/schema";
 
 import { processApprovalForAll } from "./accessControl";
+import { isMigrationDestination } from "./ensv2Constants";
 
 const BIG_INT_ZERO = BigInt.fromI32(0);
 
@@ -95,6 +97,37 @@ function saveDomain(domain: Domain): void {
   domain.save();
 }
 
+// A wrapped name's registry owner is the NameWrapper. The registry can move
+// it elsewhere without any NameWrapper event: the parent calls
+// setSubnodeOwner on a subname whose PARENT_CANNOT_CONTROL fuse is not
+// burned, or the .eth registrant calls BaseRegistrar.reclaim. After that
+// NameWrapper.isWrapped(node) is false and the ERC-1155 token is detached,
+// so the wrapped state must go, exactly as NameUnwrapped would clear it.
+// Moves to the ENSv2 Graveyard or a migration controller are the v1 voiding
+// step of a migration and keep their wrapped state (corrected later by
+// correctMigratedLegacyOwner).
+function detachWrappedStateIfLeftWrapper(
+  domain: Domain,
+  newOwner: Address
+): void {
+  // Nullable string: truthiness check, `== null` trips the AssemblyScript
+  // compileBinaryOverload crash (see nameWrapper.handleNameUnwrapped).
+  if (!domain.wrappedOwner) {
+    return;
+  }
+  let newOwnerId = newOwner.toHexString();
+  if (newOwnerId == domain.owner) {
+    return;
+  }
+  if (isMigrationDestination(newOwner)) {
+    return;
+  }
+  domain.wrappedOwner = null;
+  if (WrappedDomain.load(domain.id) != null) {
+    store.remove("WrappedDomain", domain.id);
+  }
+}
+
 // Handler for NewOwner events
 function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
   let account = new Account(event.params.owner.toHexString());
@@ -134,6 +167,7 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
     }
   }
 
+  detachWrappedStateIfLeftWrapper(domain, event.params.owner);
   domain.owner = event.params.owner.toHexString();
   domain.parent = event.params.node.toHexString();
   domain.labelhash = event.params.label;
@@ -159,6 +193,7 @@ export function handleTransfer(event: TransferEvent): void {
   // Update the domain owner
   let domain = getDomain(node)!;
 
+  detachWrappedStateIfLeftWrapper(domain, event.params.owner);
   domain.owner = event.params.owner.toHexString();
   saveDomain(domain);
 

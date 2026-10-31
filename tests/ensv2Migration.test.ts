@@ -649,6 +649,52 @@ test("wrapped-locked migration corrects wrappedOwner only, leaves registrant/own
   assert.fieldEquals("Domain", domainId, "registrant", GRAVEYARD);
 });
 
+test("a native ENSv2 .eth registration clears stale ENSv1 wrapped state", () => {
+  dataSourceMock.setNetwork("sepolia");
+  let ethBaseNamehash = setupEthNamespace();
+
+  let labelHash = Bytes.fromI32(303);
+  let domainId = pathNamehash(ethBaseNamehash, labelHash).toHexString();
+
+  // ENSv1 state of a name that expired while wrapped: registry owner is
+  // still the NameWrapper and the token's last holder is still recorded,
+  // because expiry emits no event on either contract.
+  let domain = new Domain(domainId);
+  domain.owner = SENDER;
+  domain.wrappedOwner = OWNER_2;
+  domain.isMigrated = true;
+  domain.subdomainCount = 0;
+  domain.createdAt = BigInt.fromI32(0);
+  domain.save();
+
+  let wrappedDomain = new WrappedDomain(domainId);
+  wrappedDomain.domain = domainId;
+  wrappedDomain.expiryDate = BigInt.fromI32(1000000000);
+  wrappedDomain.fuses = 0;
+  wrappedDomain.owner = OWNER_2;
+  wrappedDomain.save();
+
+  handleLabelRegistered(
+    createLabelRegisteredEvent(
+      ETH_REGISTRY,
+      slotToken(6),
+      labelHash,
+      "freshv2",
+      OWNER,
+      SENDER
+    )
+  );
+
+  assert.fieldEquals(
+    "Domain",
+    domainId,
+    "owner",
+    Address.fromString(OWNER).toHexString()
+  );
+  assert.fieldEquals("Domain", domainId, "wrappedOwner", "null");
+  assert.notInStore("WrappedDomain", domainId);
+});
+
 test("a non-migration registration is not flagged", () => {
   dataSourceMock.setNetwork("sepolia");
   setupEthNamespace();

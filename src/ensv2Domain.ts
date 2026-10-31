@@ -16,7 +16,7 @@
 // v1 system, not something to overwrite). wrappedOwner/registrant are
 // different — they're what real consumers read to find "who controls this
 // name" — so those get corrected, domain.owner does not.
-import { BigInt, log } from "@graphprotocol/graph-ts";
+import { BigInt, log, store } from "@graphprotocol/graph-ts";
 import { checkValidLabel, clampLegacyExpiry, ETH_NODE } from "./utils";
 import { getEthRegistryAddress, getV2GracePeriod } from "./ensv2Constants";
 import { pathNamehash, registryNamespaceIndexId } from "./ensv2Utils";
@@ -315,6 +315,16 @@ export function projectPathToDomain(
   let isCanonicalEthPath = false;
   if (isEth && namespace != null) {
     isCanonicalEthPath = namespace.baseNamehash.equals(ETH_NODE);
+  }
+  // A native (non-migration) ENSv2 .eth registration means the ENSv1 name
+  // had expired, and with it any NameWrapper token (expiry emits no event
+  // on either contract). Mirror ethRegistrar.handleNameRegistered and drop
+  // the stale wrapped state so the Domain reflects the live v2 owner only.
+  if (isCanonicalEthPath && !isV1Migration) {
+    domain.wrappedOwner = null;
+    if (WrappedDomain.load(domain.id) != null) {
+      store.remove("WrappedDomain", domain.id);
+    }
   }
   // Never-expiring slots carry uint64 max; clamp after adding the grace
   // period so the sum cannot overflow past the legacy maximum either.
