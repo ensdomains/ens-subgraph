@@ -3,7 +3,7 @@
 Version labels match the Subgraph Studio deployments of the mainnet subgraph
 `5XqPmWe6gjyrJtFn9cLy237i4cWw2j9HcUJEXsP5qGtH`.
 
-## Unreleased
+## v2.1.0 (2026-10-31)
 
 ### Fixed
 
