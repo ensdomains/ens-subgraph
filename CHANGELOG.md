@@ -44,7 +44,17 @@ Not deployed yet.
   retirement has to walk without ever exceeding the limit on live names. It
   is now the list of a namespace's active paths (`ENSv2Namespace.pathCount`
   long; a path retired on its own gives its position to the last one), and
-  each path records its position in `ENSv2NamePath.namespaceIndex`.
+  each path records its position in `ENSv2NamePath.namespaceIndex`. The
+  same goes for `ENSv2SlotPathIndex` and `ENSv2NamePath.slotIndex`: a path
+  that another slot takes over leaves the old slot's list, which two slots
+  handing one path back and forth could otherwise lengthen with every event.
+  What a name costs to retire also depends on what hangs off it and on how
+  long it is, so the count gives a subregistry projected under a name two
+  units (a name with a resolver and a subregistry costs 32 to 50 KB), and a
+  name longer than 255 bytes or more than 127 labels deep is not projected
+  at all (TLDs and `label.eth` names themselves excepted): every name below
+  a name repeats it, and a 10,000-character label took the cost of each
+  name below it to 88 KB.
 - A registry with more than 10,000 names when it was linked was never
   projected: the link was refused as a whole, and emitting it again met the
   same limit. That is the case of a large subname issuer that registers its
@@ -55,7 +65,13 @@ Not deployed yet.
   any registry, or by emitting the link again. Adds
   `ENSv2Namespace.backfilled`, `backfillCursor` and `backfillQueued`, and
   `ENSv2NameSlot.registryIndex`. While a namespace is not finished, the
-  ENSv1 rows below its parent name are cleared as for a refused link.
+  ENSv1 rows below its parent name are cleared as for a refused link. The
+  10,000 is a budget, not a count of names: counting a name on its
+  ancestors costs a load and a save per level, so a name is charged one unit
+  plus one for every 16 levels above it, and a subregistry found on it one
+  more for every 8. A full event then stays near 1.5 GiB of handler memory
+  at any depth; without that, 10,000 names 128 levels deep took more than
+  4 GiB.
 - Removing a link and making it again repeated the projection of every
   registry below it, up to the backfill limit, for two events. A registry's
   names are now projected at most 32 times under its canonical namespace and
@@ -74,7 +90,11 @@ Not deployed yet.
   `ENSv2ResolverAttachment.index`. This replaces the earlier decision to
   have no cap. Whether a record is the resolver's default is read from the
   root link itself, so a record linked to the root node after 100 other
-  nodes still carries its updates to the names that rely on it.
+  nodes still carries its updates to the names that rely on it. A record's
+  snapshot lists at most 1,000 coin types and 1,000 text keys
+  (`Resolver.coinTypes`, `Resolver.texts`): a record keeps an index row for
+  every one it was ever given, and each update walked them all. The
+  resolved address is read by coin type and does not depend on the list.
 - Names more than 16 registries below a link that was removed stayed live,
   with their resolver and address. Retiring names now has no depth limit
   (it works through a list instead of recursing); only projection is limited
@@ -92,11 +112,15 @@ Not deployed yet.
   `ENSv2NamePath.legacySubtreeVoided`. The sweep visits at most 100,000
   rows, and checks that against the number of child rows a name has ever
   had (new entity `DomainChildRows`) before it reads them, since the read
-  loads deleted rows too. A locked NameWrapper name that
+  loads deleted rows too. The 100,000 is shared by all the sweeps of one
+  event: a backfill can project thousands of names, each with ENSv1 rows
+  below it. A locked NameWrapper name that
   migrated into a WrapperRegistry keeps its emancipated subnames that have
   not migrated, which still resolve through ENSv1, until they migrate, leave
-  the NameWrapper (new entity `ENSv2LegacyCutoff`) or the name stops
-  pointing at a WrapperRegistry.
+  the NameWrapper (new entity `ENSv2LegacyCutoff`), have their label
+  reserved in the WrapperRegistry, or the name stops pointing at the
+  WrapperRegistry its migration linked (another WrapperRegistry does not
+  count: each serves the children of one name).
 - A link that is refused by one of the limits above left the ENSv1 `Domain`
   rows of the names behind it showing their ENSv1 resolver and address.
   Every ENSv1 row below the linked name is now cleared, with the same mark.
@@ -147,8 +171,8 @@ Not deployed yet.
   a name becomes live or stops being so, in both directions, and the change
   carries upward when the parent crosses the same line. The ENSv1 handlers,
   the ENSv2 projection and retirement, every write that sets or clears a
-  row's resolver, and the sweeps that take a resolver off ENSv1 rows all go
-  through the same functions (`src/subdomainCount.ts`). One consequence on the ENSv2 side: a retired
+  row's owner or resolver, and the sweeps that take a resolver off ENSv1
+  rows all go through the same functions (`src/subdomainCount.ts`). One consequence on the ENSv2 side: a retired
   name that still has live rows below it keeps counting in its parent until
   they are gone, as a deleted ENSv1 name always has.
 

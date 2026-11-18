@@ -40,6 +40,7 @@ import {
   addToSubdomainCount,
   countsAsChild,
   noteChildRow,
+  saveCounted,
 } from "./subdomainCount";
 
 // Recovers a slot's namehash (Domain.id) without a ENSv2NamePath in hand —
@@ -114,9 +115,13 @@ export function syncProjectedHolder(slot: ENSv2NameSlot, ownerId: string): void 
     if (domain == null) {
       continue;
     }
+    // A registry never mints to the zero address, but a contract that only
+    // emits the events can register a name to it; the row then starts
+    // counting as its parent's child here.
+    let wasCounted = countsAsChild(domain);
     domain.owner = ownerId;
     domain.registrant = ownerId;
-    domain.save();
+    saveCounted(domain, wasCounted);
     if (isCanonicalEthPath(path)) {
       let registration = Registration.load(slot.labelhash.toHexString());
       if (registration != null) {

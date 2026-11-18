@@ -31,6 +31,8 @@ import {
   handleLabelRegistered,
   handleLabelUnregistered,
   handleSubregistryUpdated,
+  handleTokenResource,
+  handleTransferSingle,
 } from "../src/ensv2Registry";
 import {
   MAX_BACKFILL_SLOTS_PER_EVENT,
@@ -48,6 +50,8 @@ import {
   createLabelRegisteredEvent,
   createLabelUnregisteredEvent,
   createSubregistryUpdatedEvent,
+  createTokenResourceEvent,
+  createTransferSingleEvent,
 } from "./ensv2TestEvents";
 
 const ROOT_REGISTRY = "0xB458D6a3a77919449d03e7A6903C26827c1eC43f";
@@ -300,6 +304,30 @@ test("a deleted name counts while it has a live child, and the change carries up
   assert.i32Equals(1, count(eth));
 });
 
+// The ENSv1 registry is a tree of hashes with no depth limit.
+test("a change carries upward through more levels than any name has labels", () => {
+  let x = setUpV1();
+  let nodes = new Array<Bytes>();
+  let parent = x;
+  for (let level = 0; level < 140; level++) {
+    newOwner(parent, "l", OWNER);
+    parent = child(parent, "l");
+    nodes.push(parent);
+  }
+  // Every level but the last gives up its owner and lives on through the
+  // one below.
+  for (let level = 0; level < 139; level++) {
+    transfer(nodes[level], EMPTY);
+  }
+  assert.i32Equals(1, count(x));
+  assert.i32Equals(1, count(nodes[0]));
+
+  newOwner(nodes[138], "l", EMPTY);
+  assert.i32Equals(0, count(nodes[138]));
+  assert.i32Equals(0, count(nodes[0]));
+  assert.i32Equals(0, count(x));
+});
+
 // ---------------------------------------------------------------------------
 // Where ENSv1 and ENSv2 meet
 // ---------------------------------------------------------------------------
@@ -331,6 +359,27 @@ test("a retired ENSv2 name that ENSv1 gave a resolver is counted once when it is
   assert.i32Equals(1, count(eth));
   unregister(ETH_REGISTRY, "x");
   assert.i32Equals(0, count(eth));
+});
+
+// A registry never mints to the zero address, but a contract that only
+// emits the events can register a name to it: the row then becomes live
+// when the token is transferred.
+test("a name registered to the zero address counts once it has a holder", () => {
+  let eth = setUpBoth();
+  register(ETH_REGISTRY, "x");
+  let x = child(eth, "x");
+  link(ETH_REGISTRY, "x", R1);
+  register(R1, "keep");
+  handleLabelRegistered(
+    createLabelRegisteredEvent(R1, tokenOf("a"), lh("a"), "a", EMPTY)
+  );
+  assert.i32Equals(1, count(x));
+
+  handleTokenResource(createTokenResourceEvent(R1, tokenOf("a"), BigInt.fromI32(1)));
+  handleTransferSingle(createTransferSingleEvent(R1, tokenOf("a"), EMPTY, OWNER));
+  assert.i32Equals(2, count(x));
+  unregister(R1, "a");
+  assert.i32Equals(1, count(x));
 });
 
 // Reading a name's children loads every row it has ever had, so the sweep

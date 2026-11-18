@@ -66,7 +66,7 @@ import {
   slotPathIndexId,
   toSlotId,
 } from "./ensv2Utils";
-import { voidLegacySubtree } from "./legacyGovernance";
+import { resetLegacySweepBudget, voidLegacySubtree } from "./legacyGovernance";
 import { getOrCreateRegistry } from "./ensv2Discovery";
 import {
   attachDomainResolver,
@@ -123,33 +123,63 @@ export const MAX_ALIAS_NAMESPACES = 8;
 export const MAX_MATERIALIZED_NAMESPACES = 16;
 
 // Names one event may project while backfilling late-linked registries, all
-// levels together (one unit per registry slot looked at). When it runs out,
-// the namespace being backfilled keeps its position (backfillCursor) and
-// joins the queue; later registry events take it up again with a budget of
-// their own (continueQueuedBackfills). The RootRegistry and ETHRegistry are
-// never backfilled and do not draw on it.
+// levels together. When it runs out, the namespace being backfilled keeps
+// its position (backfillCursor) and joins the queue; later registry events
+// take it up again with a budget of their own (continueQueuedBackfills). The
+// RootRegistry and ETHRegistry are never backfilled and do not draw on it.
+//
+// A unit is what a name a few levels deep costs, about 50 KB of handler
+// memory. Counting a name's ancestors is one load and one save per level,
+// so a registry slot looked at is charged one unit plus one for every 16
+// levels above it, and a subregistry found on a slot one more for every 8
+// (backfillSlotCost, backfillLinkCost): a backfill deep in the tree projects
+// fewer names per event instead of more memory per name. Measured in
+// matchstick, a name with a resolver and a subregistry costs 120 KB two
+// levels deep and 2 MB at 120, and a full budget stays near 1.5 GiB at any
+// depth.
 export const MAX_BACKFILL_SLOTS_PER_EVENT = 10000;
 
-// How many names may be projected below one name, at every depth, counted
-// per slot over all of the slot's paths (ENSv2SubtreeSize). A link removed,
-// an unregistration and a re-registration each retire every name below one
-// slot, in the handler of that one event, and a handler cannot give memory
-// back: retiring a name costs about 11 KB of the 4 GiB a handler has (25 KB
-// before the retire loop was slimmed down, measured in matchstick), so an
-// unbounded subtree would end in a handler that can never complete, which
-// stops the subgraph for good. At 100,000 a full retirement stays near
-// 1 GiB. A name that would take any slot above it past the limit is not
-// projected (materializePathInNamespace returns null). Names directly under
-// the RootRegistry are exempt: only ENS governance can change those links.
+// How much may be projected below one name, at every depth, counted per slot
+// over all of the slot's paths (ENSv2SubtreeSize): one unit per active name
+// and NAMESPACE_UNITS per subregistry projected under a name. A link
+// removed, an unregistration and a re-registration each retire everything
+// below one slot, in the handler of that one event, and a handler cannot
+// give memory back, so an unbounded subtree would end in a handler that can
+// never complete, which stops the subgraph for good.
+//
+// Measured in matchstick, of the 4 GiB a handler has: retiring a name costs
+// about 11 KB (13 KB with a name of 255 bytes; 25 KB before the retire loop
+// was slimmed down), and a name with a resolver and a subregistry 32 KB two
+// levels deep, 50 KB at the name-length limit, for three units. At 100,000
+// units a full retirement is about 1.3 GiB of plain names and at most
+// 1.7 GiB of names that each have a subregistry. A name or subregistry that
+// would take any slot above it past the limit is not projected
+// (materializePathInNamespace returns null, tryMaterializeNamespace false).
+// Names directly under the RootRegistry are exempt: only ENS governance can
+// change those links.
 export const MAX_NAMES_BELOW_NAME = 100000;
+
+// What a projected subregistry (a materialised namespace) counts for below
+// its parent name: retiring one costs about as much as two names.
+export const NAMESPACE_UNITS = 2;
 
 // Queue entries looked at per event. Entries whose namespace was unlinked or
 // finished in the meantime cost a couple of loads each.
 const MAX_BACKFILL_TASKS_PER_EVENT = 64;
 
-// Labels in the longest name the DNS wire format allows (255 bytes); bounds
-// the walks to the root.
-const MAX_NAME_DEPTH = 128;
+// A name is projected only when it is at most this many bytes long, the
+// longest the DNS wire format carries, and fewer than MAX_NAME_DEPTH labels
+// deep (fitsNameLimits). Every name below a name repeats it in its
+// ENSv2NamePath and Domain, so one very long label, which costs its
+// registrant next to nothing, would multiply the memory it takes to retire
+// or backfill everything below it; and the walks to the root that count a
+// name on its ancestors stop at MAX_NAME_DEPTH, so a name further down
+// would not be counted on all of them. TLDs and names directly under them
+// (label.eth) are exempt from the length limit: nothing but their own row
+// carries the label unless a name below is projected, and those are held to
+// it.
+export const MAX_NAME_BYTES = 255;
+export const MAX_NAME_DEPTH = 128;
 
 // How many times a registry's names may be projected under a canonical
 // namespace, and how many times under an alias, over its whole life
@@ -169,8 +199,10 @@ let maxBackfillSlotsPerEvent: i32 = MAX_BACKFILL_SLOTS_PER_EVENT;
 let backfillSlotBudget: i32 = MAX_BACKFILL_SLOTS_PER_EVENT;
 let maxNamesBelowName: i32 = MAX_NAMES_BELOW_NAME;
 
+// Start of a registry event: its backfill budget and its ENSv1 sweep budget.
 export function resetBackfillBudget(): void {
   backfillSlotBudget = maxBackfillSlotsPerEvent;
+  resetLegacySweepBudget();
 }
 
 // Tests only: the real limits take too long to reach in matchstick.
@@ -186,12 +218,15 @@ export function setMaxNamesBelowNameForTesting(limit: i32): void {
 // Names below a name (ENSv2SubtreeSize)
 // ---------------------------------------------------------------------------
 //
-// P(path) is the number of active paths strictly below a path, S(slot) the
-// sum of P over the slot's paths. A path that becomes active adds one to P
-// of every path above it and to S of each of their slots; RootRegistry paths
+// P(path) is the number of units strictly below a path: one for each active
+// path, and NAMESPACE_UNITS for each namespace that is materialised under a
+// path at or below it (a name's projected subregistry). S(slot) is the sum of P over
+// the slot's paths. A path that becomes active, and a namespace that is
+// materialised, adds its units to P of every path above it (the namespace's
+// own parent path included) and to S of each of their slots; RootRegistry paths
 // (no parent) are left out. Retiring is the reverse, done per subtree: each
 // retired path gives its own P back to its slot, and the paths above the
-// retired subtree lose the number of paths retired.
+// retired subtree lose the number of units retired.
 
 function addToSubtreeSize(id: Bytes, delta: i32): void {
   let row = ENSv2SubtreeSize.load(id);
@@ -208,10 +243,16 @@ function addToSubtreeSize(id: Bytes, delta: i32): void {
 }
 
 // The paths above the names of a namespace, nearest first, with their slots.
-// Stops below the RootRegistry's own names.
+// Stops below the RootRegistry's own names. Also what a name of the
+// namespace starts from: its depth, and the bytes its parent's name adds to
+// it.
 class AncestorChain {
   pathIds: Array<Bytes> = new Array<Bytes>();
   slotIds: Array<Bytes> = new Array<Bytes>();
+  // Depth of a name directly below the start path: 0 for a TLD.
+  depth: i32 = 0;
+  // "." and the start path's name, in UTF-8 bytes; 0 for a TLD.
+  parentNameBytes: i32 = 0;
 }
 
 function ancestorsFrom(startPathId: Bytes | null): AncestorChain {
@@ -222,7 +263,17 @@ function ancestorsFrom(startPathId: Bytes | null): AncestorChain {
       break;
     }
     let path = ENSv2NamePath.load(nextId);
-    if (path == null || !path.parent) {
+    if (path == null) {
+      break;
+    }
+    if (i == 0) {
+      chain.depth = path.depth + 1;
+      let parentName = path.name;
+      if (parentName !== null) {
+        chain.parentNameBytes = String.UTF8.byteLength(parentName as string) + 1;
+      }
+    }
+    if (!path.parent) {
       break;
     }
     chain.pathIds.push(path.id);
@@ -232,12 +283,41 @@ function ancestorsFrom(startPathId: Bytes | null): AncestorChain {
   return chain;
 }
 
-// Counts one more active path below every ancestor, unless that would take
-// one of their slots past the limit: then nothing is counted and the path
-// must not be created. A slot is above the path once for each of its own
-// paths in the chain (more than once when a registry is linked below one of
-// its own names) and is counted that many times.
-function reserveBelowAncestors(chain: AncestorChain): boolean {
+// Whether the slot's name under the chain's namespace may be projected:
+// MAX_NAME_DEPTH and MAX_NAME_BYTES. The label is the one materializeNamePath
+// writes.
+function fitsNameLimits(chain: AncestorChain, slot: ENSv2NameSlot): boolean {
+  if (chain.depth >= MAX_NAME_DEPTH) {
+    return false;
+  }
+  if (chain.depth < 2) {
+    return true;
+  }
+  // "[" + 64 hex digits + "]" for a label that is not shown as it is.
+  let labelBytes = 66;
+  if (checkValidLabel(slot.label)) {
+    labelBytes = String.UTF8.byteLength(slot.label as string);
+  }
+  return labelBytes + chain.parentNameBytes <= MAX_NAME_BYTES;
+}
+
+// What looking at one registry slot, and following one subregistry found on
+// it, takes from the event's backfill budget (MAX_BACKFILL_SLOTS_PER_EVENT).
+function backfillSlotCost(chain: AncestorChain): i32 {
+  return 1 + chain.pathIds.length / 16;
+}
+
+function backfillLinkCost(chain: AncestorChain): i32 {
+  return (chain.pathIds.length + 4) / 8;
+}
+
+// Counts `units` more below every ancestor (one for a path that becomes
+// active, NAMESPACE_UNITS for a namespace), unless that would take one of
+// their slots past the limit: then nothing is counted and the path or
+// namespace must not be projected. A slot is above it once for each of its
+// own paths in the chain (more than once when a registry is linked below one
+// of its own names) and is counted that many times.
+function reserveBelowAncestors(chain: AncestorChain, units: i32): boolean {
   for (let i = 0; i < chain.slotIds.length; i++) {
     let times = 0;
     for (let j = 0; j < chain.slotIds.length; j++) {
@@ -247,13 +327,13 @@ function reserveBelowAncestors(chain: AncestorChain): boolean {
     }
     let row = ENSv2SubtreeSize.load(chain.slotIds[i]);
     let counted = row == null ? 0 : row.paths;
-    if (counted + times > maxNamesBelowName) {
+    if (counted + times * units > maxNamesBelowName) {
       return false;
     }
   }
   for (let i = 0; i < chain.pathIds.length; i++) {
-    addToSubtreeSize(chain.pathIds[i], 1);
-    addToSubtreeSize(chain.slotIds[i], 1);
+    addToSubtreeSize(chain.pathIds[i], units);
+    addToSubtreeSize(chain.slotIds[i], units);
   }
   return true;
 }
@@ -283,24 +363,75 @@ function releaseOwnSubtree(path: ENSv2NamePath): void {
   row.save();
 }
 
-// The append helpers below allocate from a fresh load, for the same reason
-// as appendRegistryNamespaceIndex (ensv2Utils.ts), and sync the caller's
-// snapshot.
-function appendSlotPathIndex(slot: ENSv2NameSlot, path: ENSv2NamePath): void {
+// The list of the paths bound to a slot (ENSv2SlotPathIndex, positions 0 to
+// slot.pathCount - 1; each path knows its own position, path.slotIndex).
+// Every handler for a slot walks it, so it holds the slot's paths and
+// nothing else: a path is added when it is created for the slot or rebound
+// to it, and removed when another slot takes it over. Were rebinding only
+// to append, two slots handing one path back and forth would lengthen both
+// lists with every event.
+//
+// Like the append helpers below, these allocate from a fresh load (see
+// appendRegistryNamespaceIndex in ensv2Utils.ts) and sync the caller's
+// snapshot. addToSlotPaths sets path.slotIndex on the caller's object, which
+// the caller saves.
+function addToSlotPaths(slot: ENSv2NameSlot, path: ENSv2NamePath): void {
   let current = ENSv2NameSlot.load(slot.id);
   if (current == null) {
     current = slot;
   }
-  let next = current.pathCount;
-  let index = new ENSv2SlotPathIndex(slotPathIndexId(current.id, next));
-  index.slot = current.id;
-  index.index = next;
-  index.path = path.id;
-  index.save();
+  let position = current.pathCount;
+  let id = slotPathIndexId(current.id, position);
+  // The row may be left over from an earlier, longer list.
+  let entry = ENSv2SlotPathIndex.load(id);
+  if (entry == null) {
+    entry = new ENSv2SlotPathIndex(id);
+    entry.slot = current.id;
+    entry.index = position;
+  }
+  entry.path = path.id;
+  entry.save();
 
-  current.pathCount = next + 1;
+  current.pathCount = position + 1;
   current.save();
-  slot.pathCount = next + 1;
+  slot.pathCount = position + 1;
+  path.slotIndex = position;
+}
+
+// Takes `path` out of the list of the slot it is bound to: the last path
+// moves into its position. Call it before path.slot changes.
+function removeFromSlotPaths(path: ENSv2NamePath): void {
+  let position = path.slotIndex;
+  path.slotIndex = -1;
+  if (position < 0) {
+    return;
+  }
+  let slot = ENSv2NameSlot.load(path.slot);
+  if (slot == null) {
+    return;
+  }
+  let last = slot.pathCount - 1;
+  if (position > last) {
+    return;
+  }
+  let entry = ENSv2SlotPathIndex.load(slotPathIndexId(slot.id, position));
+  if (entry == null || !entry.path.equals(path.id)) {
+    return;
+  }
+  if (position != last) {
+    let lastEntry = ENSv2SlotPathIndex.load(slotPathIndexId(slot.id, last));
+    if (lastEntry != null) {
+      entry.path = lastEntry.path;
+      entry.save();
+      let moved = ENSv2NamePath.load(lastEntry.path);
+      if (moved != null) {
+        moved.slotIndex = position;
+        moved.save();
+      }
+    }
+  }
+  slot.pathCount = last;
+  slot.save();
 }
 
 // A registration silently resets its slot resolver even when no
@@ -724,7 +855,8 @@ function setActiveNamespace(
 // is live: a namespace lists its active paths (ENSv2NamespacePathIndex), so
 // this is neither a scan over a registry's slots nor over the names a
 // namespace has had, and what is live below one slot is bounded by
-// maxNamesBelowName. Returns the number of paths retired.
+// maxNamesBelowName. Returns the number of units retired: the paths, and the
+// namespaces they were under.
 //
 // This loop is why that bound exists, so it loads as little as it can per
 // name: the index row, the path and its Domain. The parent's subdomainCount
@@ -736,6 +868,9 @@ function drainDeactivation(pending: Array<Bytes>, block: ethereum.Block): i32 {
     if (namespace == null) {
       continue;
     }
+    // Only materialised namespaces are queued, and each counted below its
+    // parent name.
+    retired += NAMESPACE_UNITS;
     // Siblings share a parent Domain; "" while none has been seen.
     let parentDomainId = "";
     let parentDecrement = 0;
@@ -786,10 +921,12 @@ function drainDeactivation(pending: Array<Bytes>, block: ethereum.Block): i32 {
       addToSubdomainCount(parentDomainId, -parentDecrement);
     }
     // Every path the namespace listed is retired: the list is empty.
-    let emptied = ENSv2Namespace.load(namespace.id);
-    if (emptied != null && emptied.pathCount != 0) {
-      emptied.pathCount = 0;
-      emptied.save();
+    if (namespace.pathCount != 0) {
+      let emptied = ENSv2Namespace.load(namespace.id);
+      if (emptied != null) {
+        emptied.pathCount = 0;
+        emptied.save();
+      }
     }
   }
   return retired;
@@ -833,7 +970,7 @@ export function handleSubregistryUpdated(event: SubregistryUpdated): void {
 
   upsertNamespaceLink(parentRegistryId, parentSlot, previousChildAddress, event);
 
-  voidHoldoutsUnlessWrapperRegistry(parentSlot, event);
+  voidHoldoutsUnlessWrapperRegistry(parentSlot, previousChildAddress, event);
 
   if (isZeroAddress(event.params.subregistry)) {
     if (previousChildAddress) {
@@ -901,13 +1038,27 @@ export function handleSubregistryUpdated(event: SubregistryUpdated): void {
 // other ENSv2 name. The migration links the WrapperRegistry in the
 // transaction that registers the name, so this finds the registry's row
 // (created by its ProxyDeployed) already there.
+//
+// A WrapperRegistry sends to ENSv1 the children of the one name it was
+// deployed for (its `_node`), so the registry that counts is the one the
+// migration linked: the first one, or that same address emitted again. A
+// name that moves from one registry to another, WrapperRegistry or not, no
+// longer has its own behind it. (Whether a registry is the name's own could
+// also be read from its ParentUpdated, but a registry created in this block
+// has its own events handled after everything else in the block, so the
+// declaration is not there yet when the migration links it.)
 function voidHoldoutsUnlessWrapperRegistry(
   parentSlot: ENSv2NameSlot,
+  previousChildAddress: Bytes | null,
   event: SubregistryUpdated
 ): void {
   if (!isZeroAddress(event.params.subregistry)) {
+    let sameRegistry = true;
+    if (previousChildAddress) {
+      sameRegistry = previousChildAddress.equals(event.params.subregistry);
+    }
     let linked = ENSv2Registry.load(event.params.subregistry);
-    if (linked != null && linked.kind == "WRAPPER") {
+    if (sameRegistry && linked != null && linked.kind == "WRAPPER") {
       return;
     }
   }
@@ -968,7 +1119,9 @@ function isCanonicalNamespace(
 //   - the registry is already materialised under MAX_ALIAS_NAMESPACES
 //     aliases (a canonical namespace is exempt) or under
 //     MAX_MATERIALIZED_NAMESPACES namespaces in all,
-//   - the registry has used up its lifetime projections of this kind.
+//   - the registry has used up its lifetime projections of this kind,
+//   - the parent name, or a name above it, has maxNamesBelowName units
+//     below it already.
 // How many names the registry has does not matter here: backfillNamespace
 // projects what the event's budget allows and queues the rest.
 function tryMaterializeNamespace(
@@ -1020,6 +1173,14 @@ function tryMaterializeNamespace(
     } else {
       registry.aliasMaterializations = used + 1;
     }
+  }
+  // A projected subregistry is a unit below its parent name and the names
+  // above (ENSv2SubtreeSize). Nothing has been saved yet, so a refusal here
+  // uses up none of the registry's allowance.
+  if (
+    !reserveBelowAncestors(ancestorsFrom(namespace.parentPath), NAMESPACE_UNITS)
+  ) {
+    return false;
   }
   materialized.push(namespace.id);
   registry.materializedNamespaces = materialized;
@@ -1202,12 +1363,13 @@ function backfillNamespace(
   let slotCount = registry.slotCount;
   let cursor = namespace.backfillCursor;
   let chain = ancestorsFrom(namespace.parentPath);
+  let slotCost = backfillSlotCost(chain);
   let full = false;
   while (cursor < slotCount) {
     if (backfillSlotBudget <= 0) {
       break;
     }
-    backfillSlotBudget--;
+    backfillSlotBudget -= slotCost;
     let index = ENSv2RegistrySlotIndex.load(registrySlotIndexId(registryId, cursor));
     if (index != null) {
       let slot = ENSv2NameSlot.load(index.slot);
@@ -1258,6 +1420,13 @@ function backfillSlot(
   if (existing != null && existing.active && existing.slot.equals(slot.id)) {
     return true;
   }
+  // A name that is too long or too deep is never projected: the backfill
+  // goes on past it, and the ENSv1 row it may have had is cleared with the
+  // rest below the parent name.
+  if (existing == null && !fitsNameLimits(chain, slot)) {
+    voidLegacyBelowNamespace(namespace, event.block.timestamp);
+    return true;
+  }
   let path = materializePathInNamespace(
     registry,
     namespace,
@@ -1277,6 +1446,7 @@ function backfillSlot(
   }
   let subregistry = slot.subregistry;
   if (subregistry) {
+    backfillSlotBudget -= backfillLinkCost(chain);
     let childRegistry = getOrCreateRegistry(
       subregistry,
       Address.fromBytes(subregistry),
@@ -1321,13 +1491,22 @@ export function materializePathsForSlot(
     if (namespace == null || !namespace.active || !namespace.materialized) {
       continue;
     }
+    let chain = ancestorsFrom(namespace.parentPath);
+    let pathId = pathNamehash(namespace.baseNamehash, slot.labelhash);
+    if (ENSv2NamePath.load(pathId) == null && !fitsNameLimits(chain, slot)) {
+      // Too long or too deep: never projected, so nothing for a later
+      // backfill to pick up. The ENSv1 row it may have had is cleared with
+      // the rest below the parent name.
+      voidLegacyBelowNamespace(namespace, event.block.timestamp);
+      continue;
+    }
     let path = materializePathInNamespace(
       registry,
       namespace,
       slot,
       event,
       isV1Migration,
-      null
+      chain
     );
     if (path == null) {
       // A name above is full. The namespace now misses this name: a backfill
@@ -1348,31 +1527,31 @@ export function materializePathsForSlot(
 
 // Materialises (or rebinds and reactivates) the slot's path under one
 // namespace and projects it. Returns null, and writes nothing, when the path
-// would become active under a name that already has maxNamesBelowName names
-// below it. `chain` is the namespace's ancestors when the caller already has
-// them (a backfill projects many names under one namespace).
+// would become active under a name that already has maxNamesBelowName units
+// below it, or when a new path would not fit the name limits (callers check
+// fitsNameLimits first to tell the two apart). `chain` is the namespace's
+// ancestors (ancestorsFrom(namespace.parentPath)).
 function materializePathInNamespace(
   registry: ENSv2Registry,
   namespace: ENSv2Namespace,
   slot: ENSv2NameSlot,
   event: ethereum.Event,
   isV1Migration: boolean,
-  chain: AncestorChain | null
+  chain: AncestorChain
 ): ENSv2NamePath | null {
   let pathId = pathNamehash(namespace.baseNamehash, slot.labelhash);
   let path = ENSv2NamePath.load(pathId);
+  if (path == null && !fitsNameLimits(chain, slot)) {
+    return null;
+  }
   if (path == null || !path.active) {
-    let ancestors = chain;
-    if (ancestors == null) {
-      ancestors = ancestorsFrom(namespace.parentPath);
-    }
-    if (!reserveBelowAncestors(ancestors)) {
+    if (!reserveBelowAncestors(chain, 1)) {
       return null;
     }
   }
   if (path == null) {
     path = materializeNamePath(pathId, namespace, slot, event);
-    appendSlotPathIndex(slot, path);
+    addToSlotPaths(slot, path);
     addToNamespacePaths(namespace, path);
     path.save();
   } else {
@@ -1388,12 +1567,14 @@ function materializePathInNamespace(
         addToSubtreeSize(path.slot, -below.paths);
         addToSubtreeSize(slot.id, below.paths);
       }
-      // It leaves the old namespace's list, if it is still in it.
+      // It leaves the old namespace's list, if it is still in it, and the
+      // old slot's.
       removeFromNamespacePaths(path);
+      removeFromSlotPaths(path);
       path.slot = slot.id;
       path.registry = slot.registry;
       path.namespace = namespace.id;
-      appendSlotPathIndex(slot, path);
+      addToSlotPaths(slot, path);
     }
     // A path deactivated by LabelUnregistered or a namespace unlink comes
     // back: its Domain row (if any) is reused by the projection below, which
@@ -1462,6 +1643,7 @@ function materializeNamePath(
   path.active = true;
   path.namespaceCount = 0;
   path.namespaceIndex = -1;
+  path.slotIndex = -1;
   path.legacySubtreeVoided = false;
   path.createdAt = event.block.timestamp;
   path.updatedAt = event.block.timestamp;

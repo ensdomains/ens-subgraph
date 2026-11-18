@@ -21,6 +21,7 @@ import { concat, createOrLoadAccount, i32ToBytes, ROOT_NODE } from "./utils";
 import { getEnsV1ResolverAddress } from "./ensv2Constants";
 import { countsAsChild, saveCounted } from "./subdomainCount";
 import {
+  resolverAddressId,
   resolverAddressIndexId,
   resolverLinkId,
   resolverLinkIndexId,
@@ -48,6 +49,24 @@ import {
 // resolver when its default record changes. Names beyond that are not
 // projected from the record at all.
 export const MAX_LEGACY_FANOUT = 100;
+
+// Coin types and text keys of a record that its legacy snapshot lists
+// (Resolver.coinTypes and Resolver.texts). The source has no address filter
+// and a record keeps an index row for every coin type and key it was ever
+// given, so without a limit each update of a record would walk a list that
+// any contract can lengthen by one per event. The resolved address does not
+// depend on it: it is read by coin type. A record past the limit lists its
+// first MAX_LEGACY_SNAPSHOT_KEYS and its resolver is flagged
+// (ENSv2Resolver.legacyProjectionTruncated).
+export const MAX_LEGACY_SNAPSHOT_KEYS = 1000;
+
+let maxLegacySnapshotKeys: i32 = MAX_LEGACY_SNAPSHOT_KEYS;
+
+// Tests only: reaching the real limit means rebuilding a thousand-entry
+// snapshot a thousand times.
+export function setMaxLegacySnapshotKeysForTesting(limit: i32): void {
+  maxLegacySnapshotKeys = limit;
+}
 
 const ETH_COIN_TYPE = BigInt.fromI32(60);
 // ENSIP-19 default EVM coin type (1 << 31).
@@ -537,12 +556,14 @@ function buildLegacyRecordSnapshot(
   let snapshot = new LegacyRecordSnapshot();
   snapshot.contentHash = record.contenthash;
 
+  let truncated = false;
   let coinTypes = new Array<BigInt>();
-  // Empty means unset, as on chain. (Non-null locals: comparing nullable
-  // Bytes against null crashes the AssemblyScript compiler.)
-  let ethBytes = new Bytes(0);
-  let defaultBytes = new Bytes(0);
-  for (let i = 0; i < record.addressIndexCount; i++) {
+  let addressCount = record.addressIndexCount;
+  if (addressCount > maxLegacySnapshotKeys) {
+    addressCount = maxLegacySnapshotKeys;
+    truncated = true;
+  }
+  for (let i = 0; i < addressCount; i++) {
     let index = ENSv2ResolverAddressIndex.load(
       resolverAddressIndexId(record.id, i),
     );
@@ -554,11 +575,24 @@ function buildLegacyRecordSnapshot(
       continue;
     }
     coinTypes.push(address.coinType);
-    if (address.coinType.equals(ETH_COIN_TYPE)) {
-      ethBytes = address.addressBytes;
-    } else if (address.coinType.equals(DEFAULT_EVM_COIN_TYPE)) {
-      defaultBytes = address.addressBytes;
-    }
+  }
+  // The two coin types addr() is answered from, read by id so that neither
+  // depends on where it sits in the list. Empty means unset, as on chain.
+  // (Non-null locals: comparing nullable Bytes against null crashes the
+  // AssemblyScript compiler.)
+  let ethBytes = new Bytes(0);
+  let defaultBytes = new Bytes(0);
+  let ethAddress = ENSv2ResolverAddress.load(
+    resolverAddressId(record.id, ETH_COIN_TYPE),
+  );
+  if (ethAddress != null) {
+    ethBytes = ethAddress.addressBytes;
+  }
+  let defaultAddress = ENSv2ResolverAddress.load(
+    resolverAddressId(record.id, DEFAULT_EVM_COIN_TYPE),
+  );
+  if (defaultAddress != null) {
+    defaultBytes = defaultAddress.addressBytes;
   }
   // addr() as PermissionedResolver answers it (AbstractRecordResolver
   // _getAddress): the coin type 60 address, or the ENSIP-19 default EVM
@@ -573,7 +607,15 @@ function buildLegacyRecordSnapshot(
   }
 
   let texts = new Array<string>();
-  for (let i = 0; i < record.textIndexCount; i++) {
+  let textCount = record.textIndexCount;
+  if (textCount > maxLegacySnapshotKeys) {
+    textCount = maxLegacySnapshotKeys;
+    truncated = true;
+  }
+  if (truncated) {
+    flagLegacyProjectionTruncated(record.resolver);
+  }
+  for (let i = 0; i < textCount; i++) {
     let index = ENSv2ResolverTextIndex.load(
       resolverTextIndexId(record.id, i),
     );

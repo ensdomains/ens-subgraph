@@ -12,7 +12,11 @@ import {
   handleLinked,
   handleTextUpdated,
 } from "../src/ensv2Resolver";
-import { MAX_LEGACY_FANOUT } from "../src/ensv2ResolverProjection";
+import {
+  MAX_LEGACY_FANOUT,
+  MAX_LEGACY_SNAPSHOT_KEYS,
+  setMaxLegacySnapshotKeysForTesting,
+} from "../src/ensv2ResolverProjection";
 import { createResolverID } from "../src/resolver";
 import {
   AddressUpdated,
@@ -82,7 +86,7 @@ function contenthashEvent(value: Bytes): ContenthashUpdated {
   return event;
 }
 
-function addressEvent(value: Bytes): AddressUpdated {
+function addressEvent(value: Bytes, coinType: i32 = 60): AddressUpdated {
   let mock = newMockEvent();
   let event = new AddressUpdated(
     Address.fromString(RESOLVER_ADDRESS),
@@ -104,7 +108,7 @@ function addressEvent(value: Bytes): AddressUpdated {
   event.parameters.push(
     new ethereum.EventParam(
       "coinType",
-      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(60))
+      ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(coinType))
     )
   );
   event.parameters.push(
@@ -239,6 +243,7 @@ function runFanout(size: i32): void {
 }
 
 afterEach(() => {
+  setMaxLegacySnapshotKeysForTesting(MAX_LEGACY_SNAPSHOT_KEYS);
   clearStore();
 });
 
@@ -307,4 +312,33 @@ test("links to nodes without a Domain cost no legacy writes and stop at the limi
   // address would otherwise have created its Account.
   assert.notInStore("Account", OWNER);
   assert.fieldEquals("ENSv2Resolver", RESOLVER_ADDRESS, "legacyProjectionTruncated", "true");
+});
+
+// A record keeps an index row for every coin type it was ever given, and
+// any contract can emit AddressUpdated. The snapshot lists a bounded number
+// of them; the address itself is read by coin type, so it does not depend on
+// where coin type 60 sits in that list.
+test("a record with more coin types than its snapshot lists still resolves to its coin type 60 address", () => {
+  let owner = new Account(OWNER);
+  owner.save();
+  let node = Bytes.fromI32(1);
+  let resolverId = seedDomain(node, owner);
+  handleLinked(linkedEvent(node));
+  setMaxLegacySnapshotKeysForTesting(5);
+  for (let i = 0; i < 8; i++) {
+    handleAddressUpdated(addressEvent(Bytes.fromHexString("0x01"), 1000 + i));
+  }
+  assert.fieldEquals("Domain", node.toHexString(), "resolvedAddress", "null");
+
+  // Coin type 60 arrives last, past the end of the list.
+  handleAddressUpdated(addressEvent(Bytes.fromHexString(OWNER)));
+  assert.fieldEquals("Domain", node.toHexString(), "resolvedAddress", OWNER);
+  assert.stringEquals(OWNER, Resolver.load(resolverId)!.addr!);
+  assert.i32Equals(5, Resolver.load(resolverId)!.coinTypes!.length);
+  assert.fieldEquals("ENSv2Resolver", RESOLVER_ADDRESS, "legacyProjectionTruncated", "true");
+
+  // And it follows a change.
+  const OTHER = "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+  handleAddressUpdated(addressEvent(Bytes.fromHexString(OTHER)));
+  assert.fieldEquals("Domain", node.toHexString(), "resolvedAddress", OTHER);
 });

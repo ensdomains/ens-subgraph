@@ -18,11 +18,13 @@ import {
 import {
   appendRegistrySlotIndex,
   nameSlotId,
+  pathNamehash,
   resourceId,
   slotPathIndexId,
   toSlotId,
   tokenEntityId,
 } from "./ensv2Utils";
+import { cutOffLegacyHoldout } from "./legacyGovernance";
 import {
   checkValidLabel,
   concat,
@@ -63,6 +65,7 @@ import {
   ENSv2LabelRenewed,
   ENSv2LabelUnregistered,
   ENSv2NamePath,
+  ENSv2Namespace,
   ENSv2NameSlot,
   ENSv2Registry,
   ENSv2Resource,
@@ -283,9 +286,46 @@ export function handleLabelReserved(event: LabelReserved): void {
   }
   slot.save();
   // LabelReserved is represented as current slot state only.
+
+  // A label reserved or registered in a WrapperRegistry is ENSv2's from
+  // then on: the registry stops sending the ENSv1 name to ENSv1
+  // (_isMigratableChild reads a non-zero expiry as "v2 is the authority").
+  // A registration clears the ENSv1 row by projecting over it; a
+  // reservation projects nothing, so it is cleared here. The contract
+  // refuses to reserve a label whose ENSv1 name is still emancipated, so
+  // this is not expected to find one.
+  let registry = ENSv2Registry.load(registryId);
+  if (registry != null && registry.kind == "WRAPPER") {
+    let namespaces = registry.materializedNamespaces;
+    for (let i = 0; i < namespaces.length; i++) {
+      let namespace = ENSv2Namespace.load(namespaces[i]);
+      if (namespace == null) {
+        continue;
+      }
+      let parentPathId = namespace.parentPath;
+      if (!parentPathId) {
+        continue;
+      }
+      let parentPath = ENSv2NamePath.load(parentPathId);
+      // Only a locked migration leaves a name unmarked with ENSv1 names
+      // still showing an address below it (legacyGovernance.ts rule 3).
+      if (
+        parentPath == null ||
+        parentPath.legacySubtreeVoided ||
+        !parentPath.domain
+      ) {
+        continue;
+      }
+      cutOffLegacyHoldout(
+        pathNamehash(namespace.baseNamehash, event.params.labelHash),
+        event.block
+      );
+    }
+  }
 }
 
 export function handleLabelUnregistered(event: LabelUnregistered): void {
+  resetBackfillBudget();
   bootstrapRegistry(event.address, event.block);
 
   let registryId = event.address;

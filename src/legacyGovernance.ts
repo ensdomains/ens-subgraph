@@ -89,19 +89,33 @@ import {
 const CANNOT_UNWRAP: i32 = 1;
 const PARENT_CANNOT_CONTROL: i32 = 65536;
 
-// ENSv1 rows visited by one sweep (voidLegacyRowsBelow). Each row is an
-// ENSv1 name someone paid a registry transaction to create, and a sweep runs
-// once per ENSv2 name, so this only guards against a single handler that
-// would not finish. Rows past it keep their resolver; a warning is logged.
+// ENSv1 rows one event's sweeps may visit, all of them together
+// (voidLegacyRowsBelow). A sweep runs once per ENSv2 name, but one event can
+// project thousands of names (a backfill) or retire as many, each with ENSv1
+// rows below it, and a row visited costs about 7 KB of handler memory that
+// is not given back. Each row is an ENSv1 name someone paid a registry
+// transaction to create, so this only guards against a handler that would
+// not finish. Rows past it keep their resolver; a warning is logged.
 export const MAX_LEGACY_ROWS_VOIDED = 100000;
 
-// Module state, as in ensv2Paths.ts: matchstick runs every test in one
-// instance.
+// Module state, as in ensv2Paths.ts: graph-node runs each handler in a
+// fresh instance, matchstick runs every test in one, so the handlers that
+// can sweep reset the budget themselves (resetLegacySweepBudget).
 let maxLegacyRowsVoided: i32 = MAX_LEGACY_ROWS_VOIDED;
+let legacyRowsBudget: i32 = MAX_LEGACY_ROWS_VOIDED;
+
+export function resetLegacySweepBudget(): void {
+  legacyRowsBudget = maxLegacyRowsVoided;
+}
 
 // Tests only: the real limit takes too long to reach in matchstick.
 export function setMaxLegacyRowsVoidedForTesting(limit: i32): void {
   maxLegacyRowsVoided = limit;
+  legacyRowsBudget = limit;
+}
+
+export function legacySweepBudgetForTesting(): i32 {
+  return legacyRowsBudget;
 }
 
 // Levels isDetachedFromEnsv1 walks up. A DNS-encoded name of 255 bytes has
@@ -276,7 +290,6 @@ function voidLegacyRowsBelow(
   keepHoldouts: boolean,
   timestamp: BigInt
 ): boolean {
-  let budget = maxLegacyRowsVoided;
   let pending = new Array<string>();
   pending.push(root.id);
   while (pending.length > 0) {
@@ -286,19 +299,19 @@ function voidLegacyRowsBelow(
       continue;
     }
     if (
-      budget <= 0 ||
-      parent.subdomainCount > budget ||
-      childRowsOf(parent.id) > budget
+      legacyRowsBudget <= 0 ||
+      parent.subdomainCount > legacyRowsBudget ||
+      childRowsOf(parent.id) > legacyRowsBudget
     ) {
       log.warning(
-        "voidLegacyRowsBelow: more ENSv1 rows below {} than one sweep visits, stopped at {}",
+        "voidLegacyRowsBelow: more ENSv1 rows than one event's sweeps visit, stopped below {} at {}",
         [root.id, parent.id]
       );
       return false;
     }
     let isRoot = parentId == root.id;
     let children = parent.subdomains.load();
-    budget -= children.length;
+    legacyRowsBudget -= children.length;
     for (let i = 0; i < children.length; i++) {
       let child = children[i];
       let childPath = ENSv2NamePath.load(Bytes.fromHexString(child.id));
@@ -388,6 +401,8 @@ export function isLegacyHoldout(domain: Domain, block: ethereum.Block): boolean 
 // left the NameWrapper, or lost its ENSv1 owner). If it did, the name and
 // everything below it lose resolver and address, once and for good.
 export function cutOffLegacyHoldout(node: Bytes, block: ethereum.Block): void {
+  // Called once per event, by handlers that do not sweep otherwise.
+  resetLegacySweepBudget();
   let domain = Domain.load(node.toHexString());
   if (domain == null || isLegacyHoldout(domain, block)) {
     return;

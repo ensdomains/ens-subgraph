@@ -24,15 +24,24 @@ import {
 } from "matchstick-as/assembly/index";
 import {
   handleLabelRegistered,
+  handleLabelReserved,
   handleLabelUnregistered,
   handleParentUpdated,
   handleSubregistryUpdated,
 } from "../src/ensv2Registry";
 import {
+  legacySweepBudgetForTesting,
+  MAX_LEGACY_ROWS_VOIDED,
+  setMaxLegacyRowsVoidedForTesting,
+} from "../src/legacyGovernance";
+import {
   handleProxyDeployed,
   handleRegistryParentUpdated,
 } from "../src/ensv2Discovery";
-import { ParentUpdated } from "../src/types/RootRegistry/PermissionedRegistry";
+import {
+  LabelReserved,
+  ParentUpdated,
+} from "../src/types/RootRegistry/PermissionedRegistry";
 import { handleNewResolver, handleTransfer } from "../src/ensRegistry";
 import { createResolverID } from "../src/resolver";
 import {
@@ -294,6 +303,7 @@ function setUpV1Name(): Bytes {
 }
 
 afterEach(() => {
+  setMaxLegacyRowsVoidedForTesting(MAX_LEGACY_ROWS_VOIDED);
   setMaxNamesBelowNameForTesting(MAX_NAMES_BELOW_NAME);
   clearStore();
   dataSourceMock.resetValues();
@@ -627,6 +637,100 @@ test("a locked name that stops pointing at its WrapperRegistry loses its emancip
   assertNoAddress(f.belowFree);
   handleNewResolver(v1NewResolver(f.free, OTHER_V1_RESOLVER));
   assertNoAddress(f.free);
+});
+
+// A WrapperRegistry sends to ENSv1 the children of the one name it was
+// deployed for. Another WrapperRegistry under the name is not that one.
+test("a locked name moved to another WrapperRegistry loses its emancipated ENSv1 subnames; its own link emitted again keeps them", () => {
+  let f = seedLockedName();
+  migrateLocked();
+
+  link(ETH_REGISTRY, "x", WRAPPER_REGISTRY);
+  assertHasV1Address(f.free);
+  assert.fieldEquals("ENSv2NamePath", f.xNode.toHexString(), "legacySubtreeVoided", "false");
+
+  const OTHER_WRAPPER_REGISTRY = "0xa9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9";
+  deployWrapperRegistry(OTHER_WRAPPER_REGISTRY);
+  link(ETH_REGISTRY, "x", OTHER_WRAPPER_REGISTRY);
+  assertNoAddress(f.free);
+  assertNoAddress(f.belowFree);
+  assert.fieldEquals("ENSv2NamePath", f.xNode.toHexString(), "legacySubtreeVoided", "true");
+  handleNewResolver(v1NewResolver(f.free, OTHER_V1_RESOLVER));
+  assertNoAddress(f.free);
+});
+
+function labelReserved(registry: string, label: string): LabelReserved {
+  let mockEvent = newMockEvent();
+  let event = new LabelReserved(
+    Address.fromString(registry),
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam("tokenId", ethereum.Value.fromUnsignedBigInt(tokenOf(label)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("labelHash", ethereum.Value.fromFixedBytes(lh(label)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("label", ethereum.Value.fromString(label))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("expiry", ethereum.Value.fromUnsignedBigInt(FAR_FUTURE))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("sender", ethereum.Value.fromAddress(Address.fromString(SENDER)))
+  );
+  return event;
+}
+
+// The registry reads any expiry on a label as "ENSv2 is the authority", a
+// reservation included, and a reservation projects nothing that would clear
+// the ENSv1 row.
+test("a label reserved in the WrapperRegistry ends the exception for that ENSv1 name only", () => {
+  let f = seedLockedName();
+  let other = seedLegacyName(f.xNode, "other");
+  wrap(other, PARENT_CANNOT_CONTROL);
+  migrateLocked();
+  assertHasV1Address(f.free);
+
+  handleLabelReserved(labelReserved(WRAPPER_REGISTRY, "free"));
+
+  assertNoAddress(f.free);
+  assertNoAddress(f.belowFree);
+  assert.entityCount("ENSv2LegacyCutoff", 1);
+  assertHasV1Address(other);
+  assert.fieldEquals("ENSv2NamePath", f.xNode.toHexString(), "legacySubtreeVoided", "false");
+});
+
+// One event can project thousands of names, each with ENSv1 rows below it.
+// They share one allowance of rows.
+test("the sweeps of one event share one row limit", () => {
+  let xNode = setUpV1Name();
+  let s1 = seedLegacyName(xNode, "s1", false);
+  seedLegacyName(Bytes.fromHexString(s1), "c1");
+  seedLegacyName(Bytes.fromHexString(s1), "c2");
+  let s2 = seedLegacyName(xNode, "s2", false);
+  seedLegacyName(Bytes.fromHexString(s2), "c1");
+  seedLegacyName(Bytes.fromHexString(s2), "c2");
+  register(ETH_REGISTRY, "x");
+  register(USER_REGISTRY, "s1");
+  register(USER_REGISTRY, "s2");
+
+  setMaxLegacyRowsVoidedForTesting(3);
+  link(ETH_REGISTRY, "x", USER_REGISTRY);
+
+  // Both names are projected; the two rows below the first were read, the
+  // two below the second would have gone past what was left.
+  assert.fieldEquals("ENSv2NamePath", s1, "active", "true");
+  assert.fieldEquals("ENSv2NamePath", s2, "active", "true");
+  assert.i32Equals(1, legacySweepBudgetForTesting());
 });
 
 test("a locked name that is retired loses its emancipated ENSv1 subnames", () => {

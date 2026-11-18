@@ -25,9 +25,12 @@ import { Bytes } from "@graphprotocol/graph-ts";
 import { Domain, DomainChildRows } from "./types/schema";
 import { EMPTY_ADDRESS } from "./utils";
 
-// Longest chain of parents followed when a change is carried upward: a name
-// has at most 127 labels.
-const MAX_DEPTH = 128;
+// Longest chain of parents followed when a change is carried upward. The
+// ENSv1 registry is a tree of hashes with no depth limit, and each level is
+// a registry transaction someone paid for; a chain this long costs about
+// 250 MB of handler memory to walk, and one longer than this stops being
+// followed.
+const MAX_DEPTH = 100000;
 
 // True when `domain` is counted in its parent's subdomainCount: it has a
 // parent and is live. Call it on a row as it is stored, before changing it,

@@ -602,7 +602,7 @@ type ENSv2NameSlot @entity(immutable: false) {
   subregistry: ENSv2Registry
   status: ENSv2NameSlotStatus!
   expiryDate: BigInt
-  pathCount: Int!
+  pathCount: Int! # paths bound to the slot; the length of its ENSv2SlotPathIndex list
   registryIndex: Int! # the slot's position in its registry's ENSv2RegistrySlotIndex
   migratedFromV1: Boolean! # true if the current registration's sender was a migration controller
   resources: [ENSv2Resource!]! @derivedFrom(field: "slot")
@@ -657,6 +657,8 @@ type ENSv2NamePath @entity(immutable: false) {
   # Position in its namespace's ENSv2NamespacePathIndex list while the path
   # is active, -1 otherwise.
   namespaceIndex: Int!
+  # Position in its slot's ENSv2SlotPathIndex list.
+  slotIndex: Int!
   # The namespace currently linked below this name, if any. A name has one
   # subregistry at a time, so there is at most one, and retiring the name
   # follows this instead of scanning every namespace it ever had.
@@ -1106,18 +1108,21 @@ type ENSv2RegistrySlotIndex @entity(immutable: true) {
   slot: ENSv2NameSlot!
 }
 
-# How many active ENSv2NamePath rows sit below a name, at every depth. One
-# row per ENSv2NamePath that has, or has had, names below it (id: the path's
-# namehash), and one per ENSv2NameSlot (id: the slot id) holding the sum over
-# the slot's paths. Removing a link, an unregistration and a re-registration
-# retire every name below one slot in a single event, so the slot's count is
-# capped at 100,000: a name that would take any slot above it past that is
-# left without an ENSv2NamePath and Domain (it stays in the native slot
-# graph), which keeps every retirement within what one handler can do. Names
-# directly under the RootRegistry (eth) are neither counted nor capped.
+# How much is projected below a name, at every depth: one unit for each
+# active ENSv2NamePath and two for each subregistry projected under a name
+# (a materialised ENSv2Namespace). One row per ENSv2NamePath that has, or has
+# had, anything below it (id: the path's namehash), and one per
+# ENSv2NameSlot (id: the slot id) holding the sum over the slot's paths.
+# Removing a link, an unregistration and a re-registration retire everything
+# below one slot in a single event, so the slot's count is capped at
+# 100,000: a name or subregistry that would take any slot above it past that
+# is not projected (the name stays in the native slot graph, the link is
+# recorded), which keeps every retirement within what one handler can do.
+# Names directly under the RootRegistry (eth) are neither counted nor
+# capped.
 type ENSv2SubtreeSize @entity(immutable: false) {
   id: Bytes! # ENSv2NamePath id (32 bytes) or ENSv2NameSlot id (52 bytes)
-  paths: Int!
+  paths: Int! # units: active paths, plus two per projected subregistry
 }
 
 # How many Domain rows name a Domain as their parent: every child ever
@@ -1145,7 +1150,13 @@ type ENSv2BackfillTask @entity(immutable: false) {
   namespace: ENSv2Namespace!
 }
 
-type ENSv2SlotPathIndex @entity(immutable: true) {
+# The paths bound to a slot, as a dense list: positions 0 to
+# ENSv2NameSlot.pathCount - 1. A path that another slot takes over (a parent
+# that switches subregistry hands the same namehash to the new registry's
+# slot) leaves the list, so it holds one row per name the slot is reached
+# under and does not grow with how often paths change hands; rows at or past
+# pathCount are left over and mean nothing.
+type ENSv2SlotPathIndex @entity(immutable: false) {
   id: Bytes! # slot + index
   slot: ENSv2NameSlot!
   index: Int!
