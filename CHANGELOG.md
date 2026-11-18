@@ -19,8 +19,18 @@ Not deployed yet.
   that parent's canonical name) and at most 8 other namespaces, 16 in all,
   and one event backfills at most 10,000 names (the rest follows over later
   events, see below). A namespace that is refused stays active with
-  `materialized: false`; emitting the link again retries it. The canonical namespace does not compete with aliases, so pointing
-  other names at a registry cannot keep its own names out. Adds
+  `materialized: false`; emitting the link again retries it. The canonical
+  namespace does not compete with aliases, so pointing other names at a
+  registry cannot keep its own names out. The ETHRegistry is projected
+  under names of the RootRegistry only, and the RootRegistry under none: a
+  name pointed at the ETHRegistry would otherwise repeat every later `.eth`
+  name and everything below it, so that each name in the registry of
+  `foo.eth` counted several times against what may sit below `foo.eth` and
+  took that registry's alias places. Whether a namespace is canonical is
+  re-evaluated for the registries below when a registry declares its parent
+  late, so one that had declared its own parent first no longer stays an
+  alias, and is projected if it was refused as one. That walk covers at most
+  100,000 names per event. Adds
   `ENSv2Registry.materializedNamespaces`, `ENSv2Namespace.materialized` and
   `ENSv2Namespace.canonical`. 1,754 of the registries on mainnet declare a
   parent, and in the 23 sampled the declaration preceded the link in 22.
@@ -35,7 +45,9 @@ Not deployed yet.
   every name are now counted, at every depth (new entity `ENSv2SubtreeSize`,
   per path and per slot), and a name that would take a name above it past
   100,000 is not projected: it has its `ENSv2NameSlot` and no `ENSv2NamePath`
-  or `Domain`. Names directly under the RootRegistry are exempt. The retire
+  or `Domain`. Names directly under `eth` are exempt, since only ENS
+  governance can change that link; every other TLD is limited like any
+  name. The retire
   loop now loads three entities per name instead of seven and writes the
   parent's `subdomainCount` once per run of siblings, which brings a name
   down to about 11 KB, so a full 100,000 stays near 1 GiB. It also walks

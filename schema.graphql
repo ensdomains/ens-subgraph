@@ -723,8 +723,9 @@ type ENSv2Namespace @entity(immutable: false) {
   # (ParentUpdated) and that name is itself reached through a canonical
   # namespace. A canonical namespace is materialised ahead of aliases, so
   # linking someone else's registry under other names cannot crowd it out.
-  # Evaluated when the namespace is linked and when its registry's parent
-  # declaration changes; a later change higher up the tree is not propagated.
+  # Evaluated when the namespace is linked, when its registry's parent
+  # declaration changes, and when a namespace above it becomes canonical or
+  # stops being so (for the first 100,000 names below that declaration).
   canonical: Boolean!
   pathCount: Int! # active paths under the namespace; the length of its ENSv2NamespacePathIndex list
   createdAt: BigInt!

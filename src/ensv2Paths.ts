@@ -51,7 +51,13 @@ import {
   store,
 } from "@graphprotocol/graph-ts";
 
-import { checkValidLabel, concat, createEventID, i32ToBytes } from "./utils";
+import {
+  checkValidLabel,
+  concat,
+  createEventID,
+  ETH_NODE,
+  i32ToBytes,
+} from "./utils";
 import {
   appendRegistryNamespaceIndex,
   isZeroAddress,
@@ -68,6 +74,7 @@ import {
 } from "./ensv2Utils";
 import { resetLegacySweepBudget, voidLegacySubtree } from "./legacyGovernance";
 import { getOrCreateRegistry } from "./ensv2Discovery";
+import { getRootRegistryAddress } from "./ensv2Constants";
 import {
   attachDomainResolver,
   clearDomainResolver,
@@ -155,9 +162,14 @@ export const MAX_BACKFILL_SLOTS_PER_EVENT = 10000;
 // 1.7 GiB of names that each have a subregistry. A name or subregistry that
 // would take any slot above it past the limit is not projected
 // (materializePathInNamespace returns null, tryMaterializeNamespace false).
-// Names directly under the RootRegistry are exempt: only ENS governance can
-// change those links.
+// The names directly under "eth" are exempt (nothing is counted on "eth"):
+// only ENS governance can change that link. Every other TLD is limited like
+// any name.
 export const MAX_NAMES_BELOW_NAME = 100000;
+
+// Names one ParentUpdated looks at when it carries a change of canonical
+// status down to the registries below (reconcileCanonicalBelow).
+export const MAX_CANONICAL_RECONCILE_PATHS = 100000;
 
 // What a projected subregistry (a materialised namespace) counts for below
 // its parent name: retiring one costs about as much as two names.
@@ -198,6 +210,7 @@ export const MAX_LIFETIME_MATERIALIZATIONS = 32;
 let maxBackfillSlotsPerEvent: i32 = MAX_BACKFILL_SLOTS_PER_EVENT;
 let backfillSlotBudget: i32 = MAX_BACKFILL_SLOTS_PER_EVENT;
 let maxNamesBelowName: i32 = MAX_NAMES_BELOW_NAME;
+let maxCanonicalReconcilePaths: i32 = MAX_CANONICAL_RECONCILE_PATHS;
 
 // Start of a registry event: its backfill budget and its ENSv1 sweep budget.
 export function resetBackfillBudget(): void {
@@ -214,6 +227,10 @@ export function setMaxNamesBelowNameForTesting(limit: i32): void {
   maxNamesBelowName = limit;
 }
 
+export function setMaxCanonicalReconcilePathsForTesting(limit: i32): void {
+  maxCanonicalReconcilePaths = limit;
+}
+
 // ---------------------------------------------------------------------------
 // Names below a name (ENSv2SubtreeSize)
 // ---------------------------------------------------------------------------
@@ -223,8 +240,8 @@ export function setMaxNamesBelowNameForTesting(limit: i32): void {
 // path at or below it (a name's projected subregistry). S(slot) is the sum of P over
 // the slot's paths. A path that becomes active, and a namespace that is
 // materialised, adds its units to P of every path above it (the namespace's
-// own parent path included) and to S of each of their slots; RootRegistry paths
-// (no parent) are left out. Retiring is the reverse, done per subtree: each
+// own parent path included) and to S of each of their slots; "eth" is left
+// out. Retiring is the reverse, done per subtree: each
 // retired path gives its own P back to its slot, and the paths above the
 // retired subtree lose the number of units retired.
 
@@ -242,8 +259,8 @@ function addToSubtreeSize(id: Bytes, delta: i32): void {
   row.save();
 }
 
-// The paths above the names of a namespace, nearest first, with their slots.
-// Stops below the RootRegistry's own names. Also what a name of the
+// The paths above the names of a namespace, nearest first, with their slots,
+// up to the TLD; "eth" is left out. Also what a name of the
 // namespace starts from: its depth, and the bytes its parent's name adds to
 // it.
 class AncestorChain {
@@ -273,7 +290,11 @@ function ancestorsFrom(startPathId: Bytes | null): AncestorChain {
         chain.parentNameBytes = String.UTF8.byteLength(parentName as string) + 1;
       }
     }
-    if (!path.parent) {
+    // "eth" itself is not counted: every .eth registration would rewrite its
+    // row, and only ENS governance can change that link. Any other TLD is
+    // counted and limited like every name, so that what is below it can be
+    // retired in one handler whoever comes to hold it.
+    if (!path.parent && path.namehash.equals(ETH_NODE)) {
       break;
     }
     chain.pathIds.push(path.id);
@@ -1116,6 +1137,29 @@ function isCanonicalNamespace(
   return parentNamespace != null && parentNamespace.canonical;
 }
 
+// The RootRegistry is the top of the tree and is never projected under a
+// name; the ETHRegistry is projected under names of the RootRegistry only
+// (eth). Anyone can point a name of theirs at either, for one transaction.
+// Every .eth name registered from then on would be projected a second time
+// under that name, and so would everything below it: each name in the
+// registry of foo.eth would have a path under foo.eth and one under
+// foo.<alias>.eth, would count twice against what may sit below foo.eth,
+// and would take one of that registry's alias places, with eight such
+// aliases nine times and all of them. The link is recorded and not
+// projected, like any other refused link.
+function isOwnPlaceOfCoreRegistry(
+  registry: ENSv2Registry,
+  parentSlot: ENSv2NameSlot
+): boolean {
+  if (registry.kind == "ROOT") {
+    return false;
+  }
+  if (registry.kind == "ETH") {
+    return parentSlot.registry.equals(getRootRegistryAddress());
+  }
+  return true;
+}
+
 // Decides whether the registry's names get paths under this active
 // namespace, and records the decision on both (`materialized`; a refusal is
 // not logged, one event can produce thousands). Refuses when
@@ -1126,7 +1170,9 @@ function isCanonicalNamespace(
 //     MAX_MATERIALIZED_NAMESPACES namespaces in all,
 //   - the registry has used up its lifetime projections of this kind,
 //   - the parent name, or a name above it, has maxNamesBelowName units
-//     below it already.
+//     below it already,
+//   - the registry is the RootRegistry, or the ETHRegistry under a name
+//     that is not the RootRegistry's (isOwnPlaceOfCoreRegistry).
 // How many names the registry has does not matter here: backfillNamespace
 // projects what the event's budget allows and queues the rest.
 function tryMaterializeNamespace(
@@ -1146,6 +1192,9 @@ function tryMaterializeNamespace(
     namespace.save();
   }
   if (depth >= MAX_BACKFILL_DEPTH) {
+    return false;
+  }
+  if (!isOwnPlaceOfCoreRegistry(registry, parentSlot)) {
     return false;
   }
   let materialized = registry.materializedNamespaces;
@@ -1746,6 +1795,85 @@ export function handleResolverUpdated(event: ResolverUpdated): void {
   history.save();
 }
 
+// The namespaces in `changed` became canonical, or stopped being so. Whether
+// a namespace is canonical depends on the one above it (isCanonicalNamespace),
+// so the registries linked below their names are looked at again, and so on
+// down for as long as the answer changes. A registry that declared its
+// parent before the registry above declared its own would otherwise go on
+// counting as an alias: it would use one of its alias places, and be refused
+// if they were taken. A namespace that turns out canonical and was refused
+// as an alias is materialised here.
+//
+// Walks the active names of each namespace it descends into, and stops after
+// maxCanonicalReconcilePaths of them. Below one name that is as much as can
+// be there (maxNamesBelowName), but the names of the ETHRegistry are not
+// limited, and its own declaration changing must not mean a walk over every
+// .eth name. Where it stops, the registries further on keep the flag they
+// had until they are linked or declare again: they count as aliases when
+// they could be canonical, or the reverse, which decides only whether a
+// registry is projected, never what a projected name shows.
+function reconcileCanonicalBelow(changed: Array<Bytes>, event: ethereum.Event): void {
+  let pending = changed;
+  let visited = 0;
+  while (pending.length > 0) {
+    let namespace = ENSv2Namespace.load(pending.pop());
+    if (namespace == null || !namespace.active || !namespace.materialized) {
+      continue;
+    }
+    for (let i = 0; i < namespace.pathCount; i++) {
+      if (visited >= maxCanonicalReconcilePaths) {
+        log.warning(
+          "reconcileCanonicalBelow: more than {} names below the declaration at {}, the rest keep their canonical flag",
+          [maxCanonicalReconcilePaths.toString(), namespace.id.toHexString()]
+        );
+        return;
+      }
+      visited++;
+      let entry = ENSv2NamespacePathIndex.load(
+        namespacePathIndexId(namespace.id, i)
+      );
+      if (entry == null) {
+        continue;
+      }
+      let path = ENSv2NamePath.load(entry.path);
+      if (path == null || !path.active) {
+        continue;
+      }
+      let belowId = path.activeNamespace;
+      if (!belowId) {
+        continue;
+      }
+      let below = ENSv2Namespace.load(belowId);
+      if (below == null || !below.active) {
+        continue;
+      }
+      let belowRegistry = ENSv2Registry.load(below.registry);
+      let slot = ENSv2NameSlot.load(path.slot);
+      if (belowRegistry == null || slot == null) {
+        continue;
+      }
+      let canonical = isCanonicalNamespace(belowRegistry, slot, path);
+      if (below.canonical == canonical) {
+        continue;
+      }
+      if (below.materialized) {
+        below.canonical = canonical;
+        below.save();
+        pending.push(below.id);
+      } else if (canonical) {
+        // tryMaterializeNamespace records the flag; the backfill evaluates
+        // what is below it as it goes.
+        if (tryMaterializeNamespace(below, slot, path, 0)) {
+          backfillNamespace(below.registry, below, event, 0);
+        }
+      } else {
+        below.canonical = canonical;
+        below.save();
+      }
+    }
+  }
+}
+
 // The registry changed the parent it declares, so which of its namespaces is
 // canonical may have changed with it. Re-evaluates the materialised ones
 // (at most MAX_MATERIALIZED_NAMESPACES), then materialises the canonical
@@ -1760,6 +1888,7 @@ function reconcileCanonicalNamespaces(
     return;
   }
   let materialized = registry.materializedNamespaces;
+  let changed = new Array<Bytes>();
   for (let i = 0; i < materialized.length; i++) {
     let namespace = ENSv2Namespace.load(materialized[i]);
     if (namespace == null) {
@@ -1778,8 +1907,10 @@ function reconcileCanonicalNamespaces(
     if (namespace.canonical != canonical) {
       namespace.canonical = canonical;
       namespace.save();
+      changed.push(namespace.id);
     }
   }
+  reconcileCanonicalBelow(changed, event);
 
   let declaredParent = registry.canonicalParentRegistry;
   let declaredLabel = registry.canonicalParentLabel;

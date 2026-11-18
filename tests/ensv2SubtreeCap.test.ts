@@ -27,12 +27,16 @@ import {
 import {
   handleLabelRegistered,
   handleLabelUnregistered,
+  handleParentUpdated,
   handleSubregistryUpdated,
   handleTokenResource,
   handleTransferBatch,
   handleTransferSingle,
 } from "../src/ensv2Registry";
-import { TransferBatch } from "../src/types/RootRegistry/PermissionedRegistry";
+import {
+  ParentUpdated,
+  TransferBatch,
+} from "../src/types/RootRegistry/PermissionedRegistry";
 import {
   MAX_BACKFILL_SLOTS_PER_EVENT,
   MAX_NAMES_BELOW_NAME,
@@ -53,6 +57,7 @@ import {
   ENSv2Namespace,
   ENSv2NamespacePathIndex,
   ENSv2NameSlot,
+  ENSv2Registry,
   ENSv2SubtreeSize,
 } from "../src/types/schema";
 import {
@@ -63,74 +68,30 @@ import {
   createTransferSingleEvent,
 } from "./ensv2TestEvents";
 
-const ROOT_REGISTRY = "0xB458D6a3a77919449d03e7A6903C26827c1eC43f";
-const ETH_REGISTRY = "0xD4eBcbBdF463C9c45784603Db0dDD499BC44A8B4";
-const R1 = "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
-const R2 = "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2";
-const OWNER = "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7";
-const EMPTY = "0x0000000000000000000000000000000000000000";
-const ROOT_NODE = Bytes.fromHexString(
-  "0x0000000000000000000000000000000000000000000000000000000000000000"
-);
-
-function lh(label: string): Bytes {
-  return Bytes.fromByteArray(crypto.keccak256(ByteArray.fromUTF8(label)));
-}
-
-function tokenOf(label: string): BigInt {
-  let hash = lh(label);
-  let le = new Bytes(32);
-  for (let i = 0; i < 32; i++) {
-    le[i] = hash[31 - i];
-  }
-  return BigInt.fromUnsignedBytes(le);
-}
-
-function child(parent: Bytes, label: string): Bytes {
-  return pathNamehash(parent, lh(label));
-}
-
-function register(registry: string, label: string): void {
-  handleLabelRegistered(
-    createLabelRegisteredEvent(registry, tokenOf(label), lh(label), label, OWNER)
-  );
-}
-
-function unregister(registry: string, label: string): void {
-  handleLabelUnregistered(createLabelUnregisteredEvent(registry, tokenOf(label)));
-}
-
-function link(registry: string, label: string, subregistry: string): void {
-  handleSubregistryUpdated(
-    createSubregistryUpdatedEvent(registry, tokenOf(label), subregistry)
-  );
-}
-
-function slotId(registry: string, label: string): Bytes {
-  return nameSlotId(Address.fromString(registry), toSlotId(tokenOf(label)));
-}
-
-function pathCountOf(registry: string, label: string): i32 {
-  return ENSv2NameSlot.load(slotId(registry, label))!.pathCount;
-}
-
-// Names counted below a path (by namehash) or a slot (by slot id).
-function below(id: Bytes): i32 {
-  let row = ENSv2SubtreeSize.load(id);
-  return row == null ? 0 : row.paths;
-}
-
-function ns(registry: string, base: Bytes): string {
-  return namespaceId(Address.fromString(registry), base).toHexString();
-}
-
-// "eth" in the RootRegistry with the ETHRegistry below it; returns namehash("eth").
-function setUpEth(): Bytes {
-  dataSourceMock.setNetwork("sepolia");
-  register(ROOT_REGISTRY, "eth");
-  link(ROOT_REGISTRY, "eth", ETH_REGISTRY);
-  return child(ROOT_NODE, "eth");
-}
+import {
+  assertCountsMatchRecount,
+  below,
+  child,
+  EMPTY,
+  ETH_REGISTRY,
+  isRegistered,
+  lh,
+  link,
+  ns,
+  OWNER,
+  pathCountOf,
+  R1,
+  R2,
+  register,
+  ROOT_NODE,
+  ROOT_REGISTRY,
+  RUN_LABELS,
+  RUN_REGISTRIES,
+  setUpEth,
+  slotId,
+  tokenOf,
+  unregister,
+} from "./ensv2FuzzHarness";
 
 afterEach(() => {
   setMaxNamesBelowNameForTesting(MAX_NAMES_BELOW_NAME);
@@ -375,34 +336,73 @@ test("a .eth name itself is never refused: only ENS governance can unlink the ET
   assert.i32Equals(1, pathCountOf(ETH_REGISTRY, "y"));
 });
 
-// Anyone can point a name of theirs at the ETHRegistry. From then on every
-// .eth registration and migration is also projected under that name, for
-// the price of one transaction, and removing the link retires all of them
-// in one event.
-test("a name pointed at the ETHRegistry stops collecting .eth names at the limit", () => {
+// Anyone can point a name of theirs at the ETHRegistry, for one
+// transaction. Were it projected there, every .eth name registered from
+// then on would exist a second time under that name, and so would
+// everything below it: a name in the registry of foo.eth would count twice
+// against what may sit below foo.eth and take one of that registry's alias
+// places, nine times and all of them with eight such names.
+test("the ETHRegistry is not projected under a name that points at it", () => {
   let eth = setUpEth();
-  register(ETH_REGISTRY, "squat");
-  let squat = child(eth, "squat");
-  link(ETH_REGISTRY, "squat", ETH_REGISTRY);
-  // The link and two names.
-  setMaxNamesBelowNameForTesting(NAMESPACE_UNITS + 2);
+  for (let i = 0; i < 8; i++) {
+    register(ETH_REGISTRY, "squat" + i.toString());
+    link(ETH_REGISTRY, "squat" + i.toString(), ETH_REGISTRY);
+  }
+  let squat = child(eth, "squat0");
+  // The link is recorded, as for any link that is refused.
+  assert.fieldEquals("ENSv2Namespace", ns(ETH_REGISTRY, squat), "active", "true");
+  assert.fieldEquals("ENSv2Namespace", ns(ETH_REGISTRY, squat), "materialized", "false");
+  assert.fieldEquals("ENSv2Registry", ETH_REGISTRY.toLowerCase(), "namespaceCount", "9");
 
-  register(ETH_REGISTRY, "one");
-  register(ETH_REGISTRY, "two");
-  register(ETH_REGISTRY, "three");
+  register(ETH_REGISTRY, "foo");
+  let foo = child(eth, "foo");
+  link(ETH_REGISTRY, "foo", R1);
+  register(R1, "a");
 
-  // The .eth names themselves are all there.
-  assert.fieldEquals("Domain", child(eth, "three").toHexString(), "name", "three.eth");
-  assert.fieldEquals("Domain", child(squat, "two").toHexString(), "name", "two.squat.eth");
-  assert.notInStore("ENSv2NamePath", child(squat, "three").toHexString());
-  assert.i32Equals(4, below(squat));
-  assert.i32Equals(1, pathCountOf(ETH_REGISTRY, "three"));
-
-  link(ETH_REGISTRY, "squat", EMPTY);
+  // One path each, and the registry of foo.eth has its alias places left.
+  assert.i32Equals(1, pathCountOf(ETH_REGISTRY, "foo"));
+  assert.i32Equals(1, pathCountOf(R1, "a"));
+  assert.notInStore("ENSv2NamePath", child(squat, "foo").toHexString());
+  assert.i32Equals(NAMESPACE_UNITS + 1, below(foo));
   assert.i32Equals(0, below(squat));
-  assert.fieldEquals("Domain", child(squat, "one").toHexString(), "owner", EMPTY);
-  assert.fieldEquals("Domain", child(eth, "one").toHexString(), "owner", OWNER.toLowerCase());
-  assert.fieldEquals("ENSv2NamePath", child(eth, "one").toHexString(), "active", "true");
+  assert.i32Equals(
+    1,
+    ENSv2Registry.load(Address.fromString(R1))!.materializedNamespaces.length
+  );
+  assert.fieldEquals("Domain", child(foo, "a").toHexString(), "name", "a.foo.eth");
+});
+
+// The RootRegistry is the top of the tree.
+test("the RootRegistry is not projected under a name that points at it", () => {
+  let eth = setUpEth();
+  register(ETH_REGISTRY, "x");
+  let x = child(eth, "x");
+  link(ETH_REGISTRY, "x", ROOT_REGISTRY);
+  assert.fieldEquals("ENSv2Namespace", ns(ROOT_REGISTRY, x), "materialized", "false");
+  assert.notInStore("ENSv2NamePath", child(x, "eth").toHexString());
+  assert.i32Equals(0, below(x));
+});
+
+// Only "eth" is exempt from the count. Another TLD is limited like any
+// name, so that what is below it can be retired in one handler whoever
+// comes to hold it.
+test("names directly under a TLD other than eth count against that TLD", () => {
+  dataSourceMock.setNetwork("sepolia");
+  register(ROOT_REGISTRY, "tld");
+  let tld = child(ROOT_NODE, "tld");
+  link(ROOT_REGISTRY, "tld", R1);
+  setMaxNamesBelowNameForTesting(NAMESPACE_UNITS + 2);
+  register(R1, "a");
+  register(R1, "b");
+  register(R1, "c");
+
+  assert.i32Equals(NAMESPACE_UNITS + 2, below(tld));
+  assert.i32Equals(NAMESPACE_UNITS + 2, below(slotId(ROOT_REGISTRY, "tld")));
+  assert.notInStore("ENSv2NamePath", child(tld, "c").toHexString());
+
+  link(ROOT_REGISTRY, "tld", EMPTY);
+  assert.i32Equals(0, below(tld));
+  assert.fieldEquals("ENSv2NamePath", child(tld, "a").toHexString(), "active", "false");
 });
 
 // ---------------------------------------------------------------------------
@@ -714,171 +714,6 @@ test("a namespace lists its live names only, however many it has had", () => {
 // ---------------------------------------------------------------------------
 // The counts against a recount
 // ---------------------------------------------------------------------------
-
-const R3 = "0xa3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3";
-const RUN_REGISTRIES = [ETH_REGISTRY, R1, R2, R3];
-const RUN_LABELS = ["a", "b", "c", "d"];
-
-// Every path of the names the random run registers, active or retired,
-// through the slots they belong to.
-function collectPaths(): Array<Bytes> {
-  let out = new Array<Bytes>();
-  for (let r = 0; r < RUN_REGISTRIES.length; r++) {
-    for (let l = 0; l < RUN_LABELS.length; l++) {
-      let slot = ENSv2NameSlot.load(slotId(RUN_REGISTRIES[r], RUN_LABELS[l]));
-      if (slot == null) {
-        continue;
-      }
-      let paths = slot.paths.load();
-      for (let i = 0; i < paths.length; i++) {
-        out.push(paths[i].id);
-      }
-    }
-  }
-  return out;
-}
-
-// A namespace lists exactly its active paths (ENSv2NamespacePathIndex,
-// positions 0 to pathCount - 1), each at the position the path records.
-// Retiring a namespace walks that list, so a path missing from it would stay
-// live, and one left in it would make the list grow with the namespace's
-// history.
-function assertNamespaceListsMatch(paths: Array<Bytes>, step: i32): void {
-  let activeIn = new Map<string, i32>();
-  let namespaces = new Array<Bytes>();
-  for (let i = 0; i < paths.length; i++) {
-    let path = ENSv2NamePath.load(paths[i])!;
-    let key = path.namespace.toHexString();
-    if (!activeIn.has(key)) {
-      activeIn.set(key, 0);
-      namespaces.push(path.namespace);
-    }
-    if (!path.active) {
-      assert.i32Equals(-1, path.namespaceIndex);
-      continue;
-    }
-    activeIn.set(key, activeIn.get(key) + 1);
-    let namespace = ENSv2Namespace.load(path.namespace)!;
-    if (path.namespaceIndex < 0 || path.namespaceIndex >= namespace.pathCount) {
-      log.error("step {}: {} is active at position {} of a list of {}", [
-        step.toString(),
-        path.name === null ? "?" : (path.name as string),
-        path.namespaceIndex.toString(),
-        namespace.pathCount.toString(),
-      ]);
-    }
-    assert.assertTrue(path.namespaceIndex >= 0);
-    assert.assertTrue(path.namespaceIndex < namespace.pathCount);
-    let entry = ENSv2NamespacePathIndex.load(
-      namespacePathIndexId(namespace.id, path.namespaceIndex)
-    )!;
-    assert.bytesEquals(path.id, entry.path);
-  }
-  for (let i = 0; i < namespaces.length; i++) {
-    let namespace = ENSv2Namespace.load(namespaces[i])!;
-    assert.i32Equals(activeIn.get(namespaces[i].toHexString()), namespace.pathCount);
-  }
-}
-
-// Recounts the active paths below every path from the parent pointers and
-// compares with ENSv2SubtreeSize, per path and per slot. Returns the number
-// of active paths, for the caller to check the run did something.
-function assertCountsMatchRecount(eth: Bytes, step: i32, limit: i32): i32 {
-  let paths = collectPaths();
-  assertNamespaceListsMatch(paths, step);
-
-  let expected = new Map<string, i32>();
-  let active = 0;
-  for (let i = 0; i < paths.length; i++) {
-    let path = ENSv2NamePath.load(paths[i])!;
-    if (!path.active) {
-      continue;
-    }
-    active++;
-    // A subregistry projected under the path is a unit below the path
-    // itself and below everything above it.
-    let linkedId = path.activeNamespace;
-    if (linkedId && path.parent) {
-      let linked = ENSv2Namespace.load(linkedId)!;
-      if (linked.active && linked.materialized) {
-        let own = path.id.toHexString();
-        expected.set(
-          own,
-          (expected.has(own) ? expected.get(own) : 0) + NAMESPACE_UNITS
-        );
-      }
-    }
-    let unitsHere = 1;
-    if (linkedId) {
-      let linkedHere = ENSv2Namespace.load(linkedId)!;
-      if (linkedHere.active && linkedHere.materialized) {
-        unitsHere = 1 + NAMESPACE_UNITS;
-      }
-    }
-    let parentId = path.parent;
-    while (parentId) {
-      let parent = ENSv2NamePath.load(parentId)!;
-      // No name stays live below one that was retired.
-      if (!parent.active) {
-        log.error("step {}: {} is active below the retired {}", [
-          step.toString(),
-          path.name === null ? "?" : (path.name as string),
-          parent.name === null ? "?" : (parent.name as string),
-        ]);
-      }
-      assert.assertTrue(parent.active);
-      // RootRegistry names are not counted.
-      if (!parent.parent) {
-        break;
-      }
-      let key = parent.id.toHexString();
-      expected.set(key, (expected.has(key) ? expected.get(key) : 0) + unitsHere);
-      parentId = parent.parent;
-    }
-  }
-
-  let slotTotals = new Map<string, i32>();
-  let slotIds = new Array<Bytes>();
-  for (let i = 0; i < paths.length; i++) {
-    let path = ENSv2NamePath.load(paths[i])!;
-    let key = path.id.toHexString();
-    let want = expected.has(key) ? expected.get(key) : 0;
-    if (below(path.id) != want) {
-      log.error("step {}: path {} counts {} below it, recount says {}", [
-        step.toString(),
-        path.name === null ? key : (path.name as string),
-        below(path.id).toString(),
-        want.toString(),
-      ]);
-    }
-    assert.i32Equals(want, below(path.id));
-    let slotKey = path.slot.toHexString();
-    if (!slotTotals.has(slotKey)) {
-      slotIds.push(path.slot);
-      slotTotals.set(slotKey, 0);
-    }
-    slotTotals.set(slotKey, slotTotals.get(slotKey) + want);
-  }
-  for (let i = 0; i < slotIds.length; i++) {
-    // The eth slot itself is exempt and has no row.
-    assert.i32Equals(slotTotals.get(slotIds[i].toHexString()), below(slotIds[i]));
-    if (below(slotIds[i]) > limit) {
-      log.error("step {}: slot {} has {} names below it, limit {}", [
-        step.toString(),
-        slotIds[i].toHexString(),
-        below(slotIds[i]).toString(),
-        limit.toString(),
-      ]);
-    }
-    assert.assertTrue(below(slotIds[i]) <= limit);
-  }
-  return active;
-}
-
-function isRegistered(registry: string, label: string): boolean {
-  let slot = ENSv2NameSlot.load(slotId(registry, label));
-  return slot != null && slot.status == "REGISTERED";
-}
 
 function runRandomEvents(seed: u32, steps: i32, limit: i32): void {
   let eth = setUpEth();

@@ -36,6 +36,8 @@ import {
 import {
   MAX_ALIAS_NAMESPACES,
   MAX_BACKFILL_SLOTS_PER_EVENT,
+  MAX_CANONICAL_RECONCILE_PATHS,
+  setMaxCanonicalReconcilePathsForTesting,
   MAX_LIFETIME_MATERIALIZATIONS,
   setMaxBackfillSlotsPerEventForTesting,
 } from "../src/ensv2Paths";
@@ -152,6 +154,7 @@ function registryAddress(n: i32): string {
 }
 
 afterEach(() => {
+  setMaxCanonicalReconcilePathsForTesting(MAX_CANONICAL_RECONCILE_PATHS);
   setMaxBackfillSlotsPerEventForTesting(MAX_BACKFILL_SLOTS_PER_EVENT);
   dataSourceMock.resetValues();
   clearStore();
@@ -337,6 +340,7 @@ test("a parent declaration is canonical only through a canonical parent name", (
   dataSourceMock.setNetwork("sepolia");
   const PARENT = "0xb4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4";
   const CHILD = "0xb5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5";
+  const GRANDCHILD = "0xb6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6";
   // PARENT declares no parent of its own, so its namespace is an alias.
   register(ROOT_REGISTRY, "base");
   link(ROOT_REGISTRY, "base", PARENT);
@@ -346,16 +350,85 @@ test("a parent declaration is canonical only through a canonical parent name", (
   register(PARENT, "name");
   declareParent(CHILD, PARENT, "name");
   link(PARENT, "name", CHILD);
-  assert.fieldEquals("ENSv2Namespace", ns(CHILD, child(base, "name")), "canonical", "false");
-  assert.fieldEquals("ENSv2Namespace", ns(CHILD, child(base, "name")), "materialized", "true");
+  let name = child(base, "name");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "canonical", "false");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "materialized", "true");
+  register(CHILD, "deep");
+  declareParent(GRANDCHILD, CHILD, "deep");
+  link(CHILD, "deep", GRANDCHILD);
+  let deep = child(name, "deep");
+  assert.fieldEquals("ENSv2Namespace", ns(GRANDCHILD, deep), "canonical", "false");
 
-  // Declaring the parent's own parent does not reach down: the flag is
-  // evaluated at link time and on the registry's own declaration.
+  // When the registry at the top declares its own parent, the ones below
+  // that had already declared theirs become canonical with it, at every
+  // level, and stop again when it withdraws the declaration.
   declareParent(PARENT, ROOT_REGISTRY, "base");
   assert.fieldEquals("ENSv2Namespace", ns(PARENT, base), "canonical", "true");
-  assert.fieldEquals("ENSv2Namespace", ns(CHILD, child(base, "name")), "canonical", "false");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "canonical", "true");
+  assert.fieldEquals("ENSv2Namespace", ns(GRANDCHILD, deep), "canonical", "true");
+
+  declareParent(PARENT, EMPTY, "");
+  assert.fieldEquals("ENSv2Namespace", ns(PARENT, base), "canonical", "false");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "canonical", "false");
+  assert.fieldEquals("ENSv2Namespace", ns(GRANDCHILD, deep), "canonical", "false");
+});
+
+// The walk down from a declaration is bounded: below one name it can cover
+// everything there is, but the ETHRegistry's names are not limited.
+test("carrying a declaration down stops after a bounded number of names", () => {
+  dataSourceMock.setNetwork("sepolia");
+  const PARENT = "0xb9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9";
+  const CHILD = "0xbabababababababababababababababababababa";
+  register(ROOT_REGISTRY, "base");
+  link(ROOT_REGISTRY, "base", PARENT);
+  let base = child(ROOT_NODE, "base");
+  register(PARENT, "n1");
+  register(PARENT, "n2");
+  register(PARENT, "n3");
+  declareParent(CHILD, PARENT, "n3");
+  link(PARENT, "n3", CHILD);
+  let n3 = child(base, "n3");
+
+  // Two names are looked at; the third, which has the registry, is not.
+  setMaxCanonicalReconcilePathsForTesting(2);
+  declareParent(PARENT, ROOT_REGISTRY, "base");
+  assert.fieldEquals("ENSv2Namespace", ns(PARENT, base), "canonical", "true");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, n3), "canonical", "false");
+
+  // Its own link or declaration brings it up to date.
+  declareParent(CHILD, PARENT, "n3");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, n3), "canonical", "true");
+});
+
+// A registry that declared its parent before the registry above declared
+// its own counted as an alias. If its alias places were already taken, its
+// own name was refused, and stayed refused after the declaration above made
+// it canonical.
+test("a registry refused as an alias is projected once a declaration above makes its name canonical", () => {
+  dataSourceMock.setNetwork("sepolia");
+  const PARENT = "0xb7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7";
+  const CHILD = "0xb8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8";
+  register(CHILD, "sub");
+  // Eight other names already point at CHILD.
+  for (let i = 0; i < MAX_ALIAS_NAMESPACES; i++) {
+    register(ROOT_REGISTRY, "squat" + i.toString());
+    link(ROOT_REGISTRY, "squat" + i.toString(), CHILD);
+  }
+  register(ROOT_REGISTRY, "base");
+  link(ROOT_REGISTRY, "base", PARENT);
+  let base = child(ROOT_NODE, "base");
+  register(PARENT, "name");
+  let name = child(base, "name");
   declareParent(CHILD, PARENT, "name");
-  assert.fieldEquals("ENSv2Namespace", ns(CHILD, child(base, "name")), "canonical", "true");
+  link(PARENT, "name", CHILD);
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "active", "true");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "materialized", "false");
+  assert.notInStore("ENSv2NamePath", child(name, "sub").toHexString());
+
+  declareParent(PARENT, ROOT_REGISTRY, "base");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "canonical", "true");
+  assert.fieldEquals("ENSv2Namespace", ns(CHILD, name), "materialized", "true");
+  assert.fieldEquals("Domain", child(name, "sub").toHexString(), "name", "sub.name.base");
 });
 
 // ---------------------------------------------------------------------------
