@@ -22,5 +22,10 @@ jobs:
       - name: Install Dependencies
         run: yarn install --immutable
 
+      # The matchstick version is pinned: without -v, graph test asks the
+      # GitHub API for the latest release on every run (tests/.latest.json
+      # only caches it for a day), and that unauthenticated call fails from
+      # the runner often enough to break the job before any test runs
+      # ("Failed to get matchstick binary: Invalid version").
       - name: Run Tests
-        run: yarn codegen && yarn test
+        run: yarn codegen && yarn test -v 0.6.0
