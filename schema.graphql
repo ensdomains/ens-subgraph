@@ -654,6 +654,9 @@ type ENSv2NamePath @entity(immutable: false) {
   domain: Domain # compatibility projection; nullable for late-linked and root paths
   active: Boolean!
   namespaceCount: Int! # needed to enumerate ENSv2PathNamespaceIndex
+  # Position in its namespace's ENSv2NamespacePathIndex list while the path
+  # is active, -1 otherwise.
+  namespaceIndex: Int!
   # The namespace currently linked below this name, if any. A name has one
   # subregistry at a time, so there is at most one, and retiring the name
   # follows this instead of scanning every namespace it ever had.
@@ -721,7 +724,7 @@ type ENSv2Namespace @entity(immutable: false) {
   # Evaluated when the namespace is linked and when its registry's parent
   # declaration changes; a later change higher up the tree is not propagated.
   canonical: Boolean!
-  pathCount: Int! # used to enumerate ENSv2NamespacePathIndex
+  pathCount: Int! # active paths under the namespace; the length of its ENSv2NamespacePathIndex list
   createdAt: BigInt!
   createdAtBlock: BigInt!
   updatedAtBlock: BigInt!
@@ -1117,6 +1120,16 @@ type ENSv2SubtreeSize @entity(immutable: false) {
   paths: Int!
 }
 
+# How many Domain rows name a Domain as their parent: every child ever
+# indexed, live or deleted (Domain.subdomainCount counts the live ones).
+# Reading a name's children loads all of these rows, so the sweep that clears
+# ENSv1 names below an ENSv2 name checks this before it does
+# (legacyGovernance.ts).
+type DomainChildRows @entity(immutable: false) {
+  id: Bytes! # namehash of the parent
+  rows: Int!
+}
+
 # Namespaces whose registry had more names when it was linked than one event
 # projects (ENSv2Namespace.backfilled: false), in the order they are taken up
 # again. A single row; tasks are numbered from `head` (next to run) to
@@ -1165,7 +1178,12 @@ type ENSv2LegacyCutoff @entity(immutable: true) {
 # of a namespace's paths in bounded time when the namespace itself is
 # deactivated, the same way ENSv2SlotPathIndex already lets
 # handleLabelUnregistered deactivate a slot's own paths.
-type ENSv2NamespacePathIndex @entity(immutable: true) {
+# The active paths of a namespace, as a dense list: positions 0 to
+# ENSv2Namespace.pathCount - 1. A path that is retired on its own gives its
+# position to the last one, so the list never holds more than the namespace
+# has live names, however many it has had; rows at or past pathCount are
+# left over and mean nothing. Retiring a namespace walks this list.
+type ENSv2NamespacePathIndex @entity(immutable: false) {
   id: Bytes! # namespace + index
   namespace: ENSv2Namespace!
   index: Int!

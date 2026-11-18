@@ -19,6 +19,7 @@ import { Address, BigInt, Bytes } from "@graphprotocol/graph-ts";
 import { createResolverID } from "./resolver";
 import { concat, createOrLoadAccount, i32ToBytes, ROOT_NODE } from "./utils";
 import { getEnsV1ResolverAddress } from "./ensv2Constants";
+import { countsAsChild, saveCounted } from "./subdomainCount";
 import {
   resolverAddressIndexId,
   resolverLinkId,
@@ -217,14 +218,18 @@ export function clearLegacyResolverSnapshot(
   }
 }
 
+// A row can be live through its resolver alone (a retired ENSv2 name that
+// ENSv1 gave a resolver afterwards), so taking the resolver off can take it
+// out of its parent's subdomainCount (subdomainCount.ts).
 export function clearDomainResolver(node: Bytes): void {
   let domain = Domain.load(node.toHexString());
   if (domain == null) {
     return;
   }
+  let wasCounted = countsAsChild(domain);
   domain.resolver = null;
   domain.resolvedAddress = null;
-  domain.save();
+  saveCounted(domain, wasCounted);
 }
 
 // Shared by the ENSv2 registry and PermissionedResolver mappings.
@@ -261,8 +266,9 @@ export function attachDomainResolver(
     legacy.address = resolverAddress;
     legacy.save();
   }
+  let wasCounted = countsAsChild(domain);
   domain.resolver = legacy.id;
-  domain.save();
+  saveCounted(domain, wasCounted);
 
   recordResolverAttachment(resolverAddress, node, fromRegistryV2);
   if (projectEffectiveRecord(resolverAddress, node)) {
@@ -444,9 +450,18 @@ export function projectRecordToActiveMemberships(
     let membership = activeRecordMembershipAt(record, i);
     if (membership != null) {
       snapshot = replaceLegacyResolverSnapshot(record, membership.node, snapshot);
-      if (membership.node.equals(ROOT_NODE)) {
-        refreshDefaultRecordConsumers(record.resolver);
-      }
+    }
+  }
+  // Whether the record is the resolver's default is read from the root
+  // link itself, not from the capped list above: a record linked to the
+  // root node after MAX_LEGACY_FANOUT other names is still the default, and
+  // the names relying on it were given its snapshot (projectEffectiveRecord)
+  // and must follow its updates.
+  let rootLink = ENSv2ResolverLink.load(resolverLinkId(record.resolver, ROOT_NODE));
+  if (rootLink != null && rootLink.active) {
+    let rootRecordId = rootLink.record;
+    if (rootRecordId && rootRecordId.equals(record.id)) {
+      refreshDefaultRecordConsumers(record.resolver);
     }
   }
 }

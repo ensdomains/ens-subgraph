@@ -344,14 +344,18 @@ function appendPathNamespaceIndex(
   path.namespaceCount = next + 1;
 }
 
-// Reverse of appendPathNamespaceIndex above — lets deactivatePathsForNamespace
-// below find every path materialised under a namespace in bounded time when
-// that namespace is deactivated, the same way ENSv2SlotPathIndex
-// already lets handleLabelUnregistered (ensv2Registry.ts) deactivate a
-// slot's own paths. Called once, at path creation, alongside
-// appendSlotPathIndex — a path's (namespace, slot) pair is fixed for its
-// whole life, so it only ever needs indexing once.
-function appendNamespacePathIndex(
+// The list of a namespace's active paths (ENSv2NamespacePathIndex, positions
+// 0 to namespace.pathCount - 1; each path knows its own position,
+// path.namespaceIndex). Retiring a namespace walks this list, and it has to
+// do so in one handler, so the list holds what is live and nothing else: a
+// path is added when it becomes active and removed when it is retired on its
+// own. An append-only index would grow with every name the namespace ever
+// had, and names registered and unregistered in turn would make it as long
+// as anyone cared to pay for without ever exceeding the limit on live names.
+//
+// Adds `path` at the end. Sets path.namespaceIndex on the caller's object,
+// which the caller saves.
+function addToNamespacePaths(
   namespace: ENSv2Namespace,
   path: ENSv2NamePath
 ): void {
@@ -359,16 +363,65 @@ function appendNamespacePathIndex(
   if (current == null) {
     current = namespace;
   }
-  let next = current.pathCount;
-  let index = new ENSv2NamespacePathIndex(namespacePathIndexId(current.id, next));
-  index.namespace = current.id;
-  index.index = next;
-  index.path = path.id;
-  index.save();
+  let position = current.pathCount;
+  let id = namespacePathIndexId(current.id, position);
+  // The row may be left over from an earlier, longer list.
+  let entry = ENSv2NamespacePathIndex.load(id);
+  if (entry == null) {
+    entry = new ENSv2NamespacePathIndex(id);
+    entry.namespace = current.id;
+    entry.index = position;
+  }
+  entry.path = path.id;
+  entry.save();
 
-  current.pathCount = next + 1;
+  current.pathCount = position + 1;
   current.save();
-  namespace.pathCount = next + 1;
+  namespace.pathCount = position + 1;
+  path.namespaceIndex = position;
+}
+
+// Takes `path` out of its namespace's list: the last path moves into its
+// position. Sets path.namespaceIndex on the caller's object, which the
+// caller saves. Call it before path.namespace changes.
+export function removeFromNamespacePaths(path: ENSv2NamePath): void {
+  let position = path.namespaceIndex;
+  path.namespaceIndex = -1;
+  if (position < 0) {
+    return;
+  }
+  let namespace = ENSv2Namespace.load(path.namespace);
+  if (namespace == null) {
+    return;
+  }
+  let last = namespace.pathCount - 1;
+  // Not in the list any more: the namespace was retired as a whole, which
+  // empties it.
+  if (position > last) {
+    return;
+  }
+  let entry = ENSv2NamespacePathIndex.load(
+    namespacePathIndexId(namespace.id, position)
+  );
+  if (entry == null || !entry.path.equals(path.id)) {
+    return;
+  }
+  if (position != last) {
+    let lastEntry = ENSv2NamespacePathIndex.load(
+      namespacePathIndexId(namespace.id, last)
+    );
+    if (lastEntry != null) {
+      entry.path = lastEntry.path;
+      entry.save();
+      let moved = ENSv2NamePath.load(lastEntry.path);
+      if (moved != null) {
+        moved.namespaceIndex = position;
+        moved.save();
+      }
+    }
+  }
+  namespace.pathCount = last;
+  namespace.save();
 }
 
 // Idempotent: sets active = true whether creating or reactivating. Caller
@@ -668,10 +721,10 @@ function setActiveNamespace(
 // link has no depth limit here, and a deep one must not be able to exhaust
 // the wasm stack. It ends because every namespace is queued at most once
 // (only on its active -> inactive transition). The work is bounded by what
-// was materialised: paths are indexed per namespace (ENSv2NamespacePathIndex),
-// so this is not a scan over a registry's slots, and what was materialised
-// below one slot is bounded by maxNamesBelowName. Returns the number of
-// paths retired.
+// is live: a namespace lists its active paths (ENSv2NamespacePathIndex), so
+// this is neither a scan over a registry's slots nor over the names a
+// namespace has had, and what is live below one slot is bounded by
+// maxNamesBelowName. Returns the number of paths retired.
 //
 // This loop is why that bound exists, so it loads as little as it can per
 // name: the index row, the path and its Domain. The parent's subdomainCount
@@ -708,6 +761,7 @@ function drainDeactivation(pending: Array<Bytes>, block: ethereum.Block): i32 {
       releaseOwnSubtree(path);
       let linkedBelow = path.activeNamespace;
       path.active = false;
+      path.namespaceIndex = -1;
       path.updatedAt = block.timestamp;
       path.updatedAtBlock = block.number;
       path.save();
@@ -730,6 +784,12 @@ function drainDeactivation(pending: Array<Bytes>, block: ethereum.Block): i32 {
     }
     if (parentDecrement > 0) {
       addToSubdomainCount(parentDomainId, -parentDecrement);
+    }
+    // Every path the namespace listed is retired: the list is empty.
+    let emptied = ENSv2Namespace.load(namespace.id);
+    if (emptied != null && emptied.pathCount != 0) {
+      emptied.pathCount = 0;
+      emptied.save();
     }
   }
   return retired;
@@ -1313,7 +1373,8 @@ function materializePathInNamespace(
   if (path == null) {
     path = materializeNamePath(pathId, namespace, slot, event);
     appendSlotPathIndex(slot, path);
-    appendNamespacePathIndex(namespace, path);
+    addToNamespacePaths(namespace, path);
+    path.save();
   } else {
     // A path id is the namehash, so a parent that switched its subregistry
     // to a new registry hands the same path to the new registry's slot.
@@ -1327,15 +1388,20 @@ function materializePathInNamespace(
         addToSubtreeSize(path.slot, -below.paths);
         addToSubtreeSize(slot.id, below.paths);
       }
+      // It leaves the old namespace's list, if it is still in it.
+      removeFromNamespacePaths(path);
       path.slot = slot.id;
       path.registry = slot.registry;
       path.namespace = namespace.id;
       appendSlotPathIndex(slot, path);
-      appendNamespacePathIndex(namespace, path);
     }
     // A path deactivated by LabelUnregistered or a namespace unlink comes
     // back: its Domain row (if any) is reused by the projection below, which
-    // counts it in its parent again.
+    // counts it in its parent again. Rebound or reactivated, it is not in
+    // this namespace's list yet.
+    if (path.namespaceIndex < 0) {
+      addToNamespacePaths(namespace, path);
+    }
     path.active = true;
     path.updatedAt = event.block.timestamp;
     path.updatedAtBlock = event.block.number;
@@ -1395,6 +1461,7 @@ function materializeNamePath(
   path.depth = depth;
   path.active = true;
   path.namespaceCount = 0;
+  path.namespaceIndex = -1;
   path.legacySubtreeVoided = false;
   path.createdAt = event.block.timestamp;
   path.updatedAt = event.block.timestamp;

@@ -54,6 +54,7 @@ import {
   deactivateDescendantsOfPath,
   resetBackfillBudget,
   materializePathsForSlot,
+  removeFromNamespacePaths,
   unlinkSubregistryFromSlot,
 } from "./ensv2Paths";
 import {
@@ -328,6 +329,9 @@ export function handleLabelUnregistered(event: LabelUnregistered): void {
       continue;
     }
     let wasActive = path.active;
+    if (wasActive) {
+      removeFromNamespacePaths(path);
+    }
     path.active = false;
     path.updatedAt = event.block.timestamp;
     path.updatedAtBlock = event.block.number;

@@ -49,7 +49,7 @@ import {
   isLegacyHoldout,
 } from "./legacyGovernance";
 import { attachDomainResolver } from "./ensv2ResolverProjection";
-import { addToSubdomainCount, countsAsChild } from "./subdomainCount";
+import { countsAsChild, noteChildRow, saveCounted } from "./subdomainCount";
 
 const BIG_INT_ZERO = BigInt.fromI32(0);
 
@@ -87,11 +87,7 @@ function makeSubnode(event: NewOwnerEvent): Bytes {
 // (subdomainCount.ts). `wasCounted` is countsAsChild(domain) as the row stood
 // before this handler changed it, false for a row created now.
 function saveDomain(domain: Domain, wasCounted: boolean): void {
-  domain.save();
-  let isCounted = countsAsChild(domain);
-  if (wasCounted != isCounted) {
-    addToSubdomainCount(domain.parent!, isCounted ? 1 : -1);
-  }
+  saveCounted(domain, wasCounted);
 }
 
 // A wrapped name's registry owner is the NameWrapper. The registry can move
@@ -194,6 +190,9 @@ function _handleNewOwner(event: NewOwnerEvent, isMigrated: boolean): void {
     parent.save();
   }
   let wasCounted = !isNewDomain && countsAsChild(domain);
+  if (!domain.parent) {
+    noteChildRow(event.params.node.toHexString());
+  }
 
   if (domain.name == null) {
     // Get label and node names

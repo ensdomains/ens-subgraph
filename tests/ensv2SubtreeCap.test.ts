@@ -31,7 +31,6 @@ import {
   namespacePathIndexId,
   nameSlotId,
   pathNamehash,
-  pathNamespaceIndexId,
   toSlotId,
 } from "../src/ensv2Utils";
 import {
@@ -40,7 +39,6 @@ import {
   ENSv2Namespace,
   ENSv2NamespacePathIndex,
   ENSv2NameSlot,
-  ENSv2PathNamespaceIndex,
   ENSv2SubtreeSize,
 } from "../src/types/schema";
 import {
@@ -346,34 +344,116 @@ test("a name pointed at the ETHRegistry stops collecting .eth names at the limit
   assert.fieldEquals("ENSv2NamePath", child(eth, "one").toHexString(), "active", "true");
 });
 
+// Retiring a namespace walks the list of its paths in one handler. Were the
+// list append-only, registering and unregistering names in turn would
+// lengthen it without limit while the number of live names stayed small.
+test("a namespace lists its live names only, however many it has had", () => {
+  let eth = setUpEth();
+  register(ETH_REGISTRY, "x");
+  let x = child(eth, "x");
+  link(ETH_REGISTRY, "x", R1);
+  let labels = ["a", "b", "c", "d"];
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < labels.length; i++) {
+      register(R1, labels[i]);
+      unregister(R1, labels[i]);
+    }
+  }
+  assert.fieldEquals("ENSv2Namespace", ns(R1, x), "pathCount", "0");
+
+  register(R1, "a");
+  register(R1, "b");
+  register(R1, "c");
+  assert.fieldEquals("ENSv2Namespace", ns(R1, x), "pathCount", "3");
+  assert.fieldEquals("ENSv2NamePath", child(x, "c").toHexString(), "namespaceIndex", "2");
+
+  // A name retired on its own gives its place to the last one.
+  unregister(R1, "a");
+  assert.fieldEquals("ENSv2Namespace", ns(R1, x), "pathCount", "2");
+  assert.fieldEquals("ENSv2NamePath", child(x, "a").toHexString(), "namespaceIndex", "-1");
+  assert.fieldEquals("ENSv2NamePath", child(x, "c").toHexString(), "namespaceIndex", "0");
+  assert.fieldEquals("ENSv2NamePath", child(x, "b").toHexString(), "namespaceIndex", "1");
+
+  // Removing the link retires the two that are left and empties the list.
+  link(ETH_REGISTRY, "x", EMPTY);
+  assert.fieldEquals("ENSv2Namespace", ns(R1, x), "pathCount", "0");
+  assert.fieldEquals("ENSv2NamePath", child(x, "b").toHexString(), "active", "false");
+  assert.fieldEquals("ENSv2NamePath", child(x, "c").toHexString(), "active", "false");
+  assert.fieldEquals("Domain", child(x, "c").toHexString(), "owner", EMPTY);
+
+  // Linked again, the names that are still registered come back.
+  link(ETH_REGISTRY, "x", R1);
+  assert.fieldEquals("ENSv2Namespace", ns(R1, x), "pathCount", "2");
+  assert.fieldEquals("ENSv2NamePath", child(x, "a").toHexString(), "active", "false");
+  assert.fieldEquals("ENSv2NamePath", child(x, "b").toHexString(), "active", "true");
+});
+
 // ---------------------------------------------------------------------------
 // The counts against a recount
 // ---------------------------------------------------------------------------
 
-// Every path ever created, found through the namespace and path indexes.
-function collectPaths(namespaceIdHex: Bytes, seen: Map<string, boolean>, out: Array<Bytes>): void {
-  let namespace = ENSv2Namespace.load(namespaceIdHex);
-  if (namespace == null) {
-    return;
-  }
-  for (let i = 0; i < namespace.pathCount; i++) {
-    let index = ENSv2NamespacePathIndex.load(namespacePathIndexId(namespace.id, i));
-    if (index == null) {
-      continue;
-    }
-    let key = index.path.toHexString();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.set(key, true);
-    out.push(index.path);
-    let path = ENSv2NamePath.load(index.path)!;
-    for (let j = 0; j < path.namespaceCount; j++) {
-      let below = ENSv2PathNamespaceIndex.load(pathNamespaceIndexId(path.id, j));
-      if (below != null) {
-        collectPaths(below.namespace, seen, out);
+const R3 = "0xa3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3";
+const RUN_REGISTRIES = [ETH_REGISTRY, R1, R2, R3];
+const RUN_LABELS = ["a", "b", "c", "d"];
+
+// Every path of the names the random run registers, active or retired,
+// through the slots they belong to.
+function collectPaths(): Array<Bytes> {
+  let out = new Array<Bytes>();
+  for (let r = 0; r < RUN_REGISTRIES.length; r++) {
+    for (let l = 0; l < RUN_LABELS.length; l++) {
+      let slot = ENSv2NameSlot.load(slotId(RUN_REGISTRIES[r], RUN_LABELS[l]));
+      if (slot == null) {
+        continue;
+      }
+      let paths = slot.paths.load();
+      for (let i = 0; i < paths.length; i++) {
+        out.push(paths[i].id);
       }
     }
+  }
+  return out;
+}
+
+// A namespace lists exactly its active paths (ENSv2NamespacePathIndex,
+// positions 0 to pathCount - 1), each at the position the path records.
+// Retiring a namespace walks that list, so a path missing from it would stay
+// live, and one left in it would make the list grow with the namespace's
+// history.
+function assertNamespaceListsMatch(paths: Array<Bytes>, step: i32): void {
+  let activeIn = new Map<string, i32>();
+  let namespaces = new Array<Bytes>();
+  for (let i = 0; i < paths.length; i++) {
+    let path = ENSv2NamePath.load(paths[i])!;
+    let key = path.namespace.toHexString();
+    if (!activeIn.has(key)) {
+      activeIn.set(key, 0);
+      namespaces.push(path.namespace);
+    }
+    if (!path.active) {
+      assert.i32Equals(-1, path.namespaceIndex);
+      continue;
+    }
+    activeIn.set(key, activeIn.get(key) + 1);
+    let namespace = ENSv2Namespace.load(path.namespace)!;
+    if (path.namespaceIndex < 0 || path.namespaceIndex >= namespace.pathCount) {
+      log.error("step {}: {} is active at position {} of a list of {}", [
+        step.toString(),
+        path.name === null ? "?" : (path.name as string),
+        path.namespaceIndex.toString(),
+        namespace.pathCount.toString(),
+      ]);
+    }
+    assert.assertTrue(path.namespaceIndex >= 0);
+    assert.assertTrue(path.namespaceIndex < namespace.pathCount);
+    let entry = ENSv2NamespacePathIndex.load(
+      namespacePathIndexId(namespace.id, path.namespaceIndex)
+    )!;
+    assert.bytesEquals(path.id, entry.path);
+  }
+  for (let i = 0; i < namespaces.length; i++) {
+    let namespace = ENSv2Namespace.load(namespaces[i])!;
+    assert.i32Equals(activeIn.get(namespaces[i].toHexString()), namespace.pathCount);
   }
 }
 
@@ -381,9 +461,8 @@ function collectPaths(namespaceIdHex: Bytes, seen: Map<string, boolean>, out: Ar
 // compares with ENSv2SubtreeSize, per path and per slot. Returns the number
 // of active paths, for the caller to check the run did something.
 function assertCountsMatchRecount(eth: Bytes, step: i32, limit: i32): i32 {
-  let seen = new Map<string, boolean>();
-  let paths = new Array<Bytes>();
-  collectPaths(namespaceId(Address.fromString(ETH_REGISTRY), eth), seen, paths);
+  let paths = collectPaths();
+  assertNamespaceListsMatch(paths, step);
 
   let expected = new Map<string, i32>();
   let active = 0;
@@ -463,9 +542,8 @@ function runRandomEvents(seed: u32, steps: i32, limit: i32): void {
   setMaxNamesBelowNameForTesting(limit);
   // Small, so that unfinished backfills and the queue are part of the run.
   setMaxBackfillSlotsPerEventForTesting(3);
-  const R3 = "0xa3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3";
-  let registries = [ETH_REGISTRY, R1, R2, R3];
-  let labels = ["a", "b", "c", "d"];
+  let registries = RUN_REGISTRIES;
+  let labels = RUN_LABELS;
   let state: u32 = seed;
   let mostActive = 0;
   for (let step = 0; step < steps; step++) {

@@ -21,7 +21,8 @@
 // Used by the ENSv1 registry handlers (ensRegistry.ts), the ENSv2 projection
 // and its retirement (ensv2Domain.ts, ensv2Paths.ts), and the sweeps that
 // take a resolver off ENSv1 rows (legacyGovernance.ts).
-import { Domain } from "./types/schema";
+import { Bytes } from "@graphprotocol/graph-ts";
+import { Domain, DomainChildRows } from "./types/schema";
 import { EMPTY_ADDRESS } from "./utils";
 
 // Longest chain of parents followed when a change is carried upward: a name
@@ -39,6 +40,38 @@ export function countsAsChild(domain: Domain): boolean {
     return true;
   }
   return domain.owner != EMPTY_ADDRESS || domain.subdomainCount > 0;
+}
+
+// A Domain row was given `parentId` as its parent, which happens once per
+// row. Counts the rows, live or not, that a read of the parent's children
+// would load (childRowsOf).
+export function noteChildRow(parentId: string): void {
+  let id = Bytes.fromHexString(parentId);
+  let counter = DomainChildRows.load(id);
+  if (counter == null) {
+    counter = new DomainChildRows(id);
+    counter.rows = 0;
+  }
+  counter.rows = counter.rows + 1;
+  counter.save();
+}
+
+export function childRowsOf(parentId: string): i32 {
+  let counter = DomainChildRows.load(Bytes.fromHexString(parentId));
+  return counter == null ? 0 : counter.rows;
+}
+
+// Saves a row whose owner or resolver may just have changed and passes the
+// difference on to its parent. `wasCounted` is countsAsChild(domain) as the
+// row stood before the change, false for a row created now. Every write that
+// can set or clear a Domain's owner or resolver ends here or does the same
+// two steps itself.
+export function saveCounted(domain: Domain, wasCounted: boolean): void {
+  domain.save();
+  let isCounted = countsAsChild(domain);
+  if (wasCounted != isCounted) {
+    addToSubdomainCount(domain.parent!, isCounted ? 1 : -1);
+  }
 }
 
 // `delta` children of `parentId` became live (positive) or stopped being so

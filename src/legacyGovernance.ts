@@ -71,7 +71,11 @@ import { BigInt, Bytes, ethereum, log } from "@graphprotocol/graph-ts";
 import { getEnsv2FirstBlock } from "./ensv2Constants";
 import { slotEntityIdForLabelhash } from "./ensv2Utils";
 import { EMPTY_ADDRESS } from "./utils";
-import { addToSubdomainCount, countsAsChild } from "./subdomainCount";
+import {
+  addToSubdomainCount,
+  childRowsOf,
+  countsAsChild,
+} from "./subdomainCount";
 import {
   Domain,
   ENSv2LegacyCutoff,
@@ -90,6 +94,15 @@ const PARENT_CANNOT_CONTROL: i32 = 65536;
 // once per ENSv2 name, so this only guards against a single handler that
 // would not finish. Rows past it keep their resolver; a warning is logged.
 export const MAX_LEGACY_ROWS_VOIDED = 100000;
+
+// Module state, as in ensv2Paths.ts: matchstick runs every test in one
+// instance.
+let maxLegacyRowsVoided: i32 = MAX_LEGACY_ROWS_VOIDED;
+
+// Tests only: the real limit takes too long to reach in matchstick.
+export function setMaxLegacyRowsVoidedForTesting(limit: i32): void {
+  maxLegacyRowsVoided = limit;
+}
 
 // Levels isDetachedFromEnsv1 walks up. A DNS-encoded name of 255 bytes has
 // at most 127 labels; a name deeper than this is treated as detached.
@@ -253,12 +266,17 @@ function clearLegacyResolver(domain: Domain): void {
 // skip the query: a child indexed before its parent's row existed (a reset
 // testnet) is not counted, and a row left with a resolver is exactly what
 // must not be missed. Returns false when it stopped at the row limit.
+//
+// The query loads every child row the name has ever had, deleted ones
+// included, and a handler cannot give that memory back. So the limit is
+// checked against the number of rows (childRowsOf) before the query runs,
+// not against what it returned.
 function voidLegacyRowsBelow(
   root: Domain,
   keepHoldouts: boolean,
   timestamp: BigInt
 ): boolean {
-  let budget = MAX_LEGACY_ROWS_VOIDED;
+  let budget = maxLegacyRowsVoided;
   let pending = new Array<string>();
   pending.push(root.id);
   while (pending.length > 0) {
@@ -267,7 +285,11 @@ function voidLegacyRowsBelow(
     if (parent == null) {
       continue;
     }
-    if (budget <= 0 || parent.subdomainCount > budget) {
+    if (
+      budget <= 0 ||
+      parent.subdomainCount > budget ||
+      childRowsOf(parent.id) > budget
+    ) {
       log.warning(
         "voidLegacyRowsBelow: more ENSv1 rows below {} than one sweep visits, stopped at {}",
         [root.id, parent.id]

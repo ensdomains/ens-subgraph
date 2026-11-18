@@ -38,7 +38,13 @@ Not deployed yet.
   or `Domain`. Names directly under the RootRegistry are exempt. The retire
   loop now loads three entities per name instead of seven and writes the
   parent's `subdomainCount` once per run of siblings, which brings a name
-  down to about 11 KB, so a full 100,000 stays near 1 GiB.
+  down to about 11 KB, so a full 100,000 stays near 1 GiB. It also walks
+  only what is live: `ENSv2NamespacePathIndex` used to be append-only, so
+  names registered and unregistered in turn lengthened the list a
+  retirement has to walk without ever exceeding the limit on live names. It
+  is now the list of a namespace's active paths (`ENSv2Namespace.pathCount`
+  long; a path retired on its own gives its position to the last one), and
+  each path records its position in `ENSv2NamePath.namespaceIndex`.
 - A registry with more than 10,000 names when it was linked was never
   projected: the link was refused as a whole, and emitting it again met the
   same limit. That is the case of a large subname issuer that registers its
@@ -66,7 +72,9 @@ Not deployed yet.
   `Domain.resolvedAddress` are empty, never out of date; the resolver is
   flagged with `ENSv2Resolver.legacyProjectionTruncated`. Adds
   `ENSv2ResolverAttachment.index`. This replaces the earlier decision to
-  have no cap.
+  have no cap. Whether a record is the resolver's default is read from the
+  root link itself, so a record linked to the root node after 100 other
+  nodes still carries its updates to the names that rely on it.
 - Names more than 16 registries below a link that was removed stayed live,
   with their resolver and address. Retiring names now has no depth limit
   (it works through a list instead of recursing); only projection is limited
@@ -81,7 +89,10 @@ Not deployed yet.
   projected, every ENSv1 `Domain` row below it, at any depth, now loses its
   resolver and resolved address, and ENSv1 `NewResolver` events for those
   names are history-only from then on. Adds
-  `ENSv2NamePath.legacySubtreeVoided`. A locked NameWrapper name that
+  `ENSv2NamePath.legacySubtreeVoided`. The sweep visits at most 100,000
+  rows, and checks that against the number of child rows a name has ever
+  had (new entity `DomainChildRows`) before it reads them, since the read
+  loads deleted rows too. A locked NameWrapper name that
   migrated into a WrapperRegistry keeps its emancipated subnames that have
   not migrated, which still resolve through ENSv1, until they migrate, leave
   the NameWrapper (new entity `ENSv2LegacyCutoff`) or the name stops
@@ -135,9 +146,9 @@ Not deployed yet.
   and created again was never counted again. The count now changes only when
   a name becomes live or stops being so, in both directions, and the change
   carries upward when the parent crosses the same line. The ENSv1 handlers,
-  the ENSv2 projection and retirement, and the sweeps that take a resolver
-  off ENSv1 rows all go through the same two functions
-  (`src/subdomainCount.ts`). One consequence on the ENSv2 side: a retired
+  the ENSv2 projection and retirement, every write that sets or clears a
+  row's resolver, and the sweeps that take a resolver off ENSv1 rows all go
+  through the same functions (`src/subdomainCount.ts`). One consequence on the ENSv2 side: a retired
   name that still has live rows below it keeps counting in its parent until
   they are gone, as a deleted ENSv1 name always has.
 

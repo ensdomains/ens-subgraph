@@ -36,7 +36,11 @@ import {
 } from "./types/schema";
 import { syncRegistrationFromSlot } from "./ensv2Registrar";
 import { isLockedInEnsv1, voidLegacySubtree } from "./legacyGovernance";
-import { addToSubdomainCount, countsAsChild } from "./subdomainCount";
+import {
+  addToSubdomainCount,
+  countsAsChild,
+  noteChildRow,
+} from "./subdomainCount";
 
 // Recovers a slot's namehash (Domain.id) without a ENSv2NamePath in hand —
 // needed at transfer time, when only the slot is available. ENSv2NameSlot
@@ -338,7 +342,11 @@ export function projectPathToDomain(
   // syncProjectedToken writes through.
   domain.registryToken = slot.currentToken;
 
+  let hadParent = !isNewDomain && domain.parent != null;
   linkProjectedDomainToParent(domain, path);
+  if (!hadParent && domain.parent) {
+    noteChildRow(domain.parent!);
+  }
 
   // v2GracePeriod is ETHRegistrar/ETHRenewerV1-specific policy — only
   // applied for real .eth registrations, where Domain.expiryDate has always

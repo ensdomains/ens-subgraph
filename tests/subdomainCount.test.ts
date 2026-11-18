@@ -36,6 +36,10 @@ import {
   MAX_BACKFILL_SLOTS_PER_EVENT,
   setMaxBackfillSlotsPerEventForTesting,
 } from "../src/ensv2Paths";
+import {
+  MAX_LEGACY_ROWS_VOIDED,
+  setMaxLegacyRowsVoidedForTesting,
+} from "../src/legacyGovernance";
 import { countsAsChild } from "../src/subdomainCount";
 import { nameSlotId, pathNamehash, toSlotId } from "../src/ensv2Utils";
 import { Domain, ENSv2NameSlot } from "../src/types/schema";
@@ -197,6 +201,7 @@ function setUpV1(): Bytes {
 }
 
 afterEach(() => {
+  setMaxLegacyRowsVoidedForTesting(MAX_LEGACY_ROWS_VOIDED);
   setMaxBackfillSlotsPerEventForTesting(MAX_BACKFILL_SLOTS_PER_EVENT);
   dataSourceMock.resetValues();
   clearStore();
@@ -293,6 +298,80 @@ test("a deleted name counts while it has a live child, and the change carries up
   assert.i32Equals(1, count(a));
   assert.i32Equals(1, count(x));
   assert.i32Equals(1, count(eth));
+});
+
+// ---------------------------------------------------------------------------
+// Where ENSv1 and ENSv2 meet
+// ---------------------------------------------------------------------------
+
+function setUpBoth(): Bytes {
+  dataSourceMock.setNetwork("sepolia");
+  newOwner(ROOT_NODE, "eth", OWNER);
+  register(ROOT_REGISTRY, "eth");
+  link(ROOT_REGISTRY, "eth", ETH_REGISTRY);
+  return child(ROOT_NODE, "eth");
+}
+
+// A retired ENSv2 name reads as deleted. If ENSv1 then gives the row a
+// resolver it counts again, through the resolver alone, and a
+// re-registration, which first takes the old resolver off, must not count it
+// a second time.
+test("a retired ENSv2 name that ENSv1 gave a resolver is counted once when it is registered again", () => {
+  let eth = setUpBoth();
+  register(ETH_REGISTRY, "x");
+  let x = child(eth, "x");
+  assert.i32Equals(1, count(eth));
+  unregister(ETH_REGISTRY, "x");
+  assert.i32Equals(0, count(eth));
+
+  newResolver(x, RESOLVER);
+  assert.i32Equals(1, count(eth));
+
+  register(ETH_REGISTRY, "x");
+  assert.i32Equals(1, count(eth));
+  unregister(ETH_REGISTRY, "x");
+  assert.i32Equals(0, count(eth));
+});
+
+// Reading a name's children loads every row it has ever had, so the sweep
+// that clears ENSv1 names below an ENSv2 name must decide from that number
+// whether it may read them: the live ones can be few while the rows are
+// many.
+test("the ENSv1 sweep's limit is on the child rows a name has had, not on the live ones", () => {
+  let eth = setUpBoth();
+  let names = ["x", "y"];
+  for (let n = 0; n < names.length; n++) {
+    newOwner(eth, names[n], OWNER);
+    let node = child(eth, names[n]);
+    newOwner(node, "a", OWNER);
+    newOwner(node, "b", OWNER);
+    newOwner(node, "c", OWNER);
+    newResolver(child(node, "c"), RESOLVER);
+    newOwner(node, "a", EMPTY);
+    newOwner(node, "b", EMPTY);
+    assert.i32Equals(1, count(node));
+    assert.fieldEquals("DomainChildRows", node.toHexString(), "rows", "3");
+  }
+  let underX = child(child(eth, "x"), "c").toHexString();
+  let underY = child(child(eth, "y"), "c").toHexString();
+
+  // Three rows, limit three: read and cleared.
+  setMaxLegacyRowsVoidedForTesting(3);
+  register(ETH_REGISTRY, "x");
+  assert.assertNull(Domain.load(underX)!.resolver);
+
+  // Three rows, limit two: not read at all, although only one is live. The
+  // row keeps what it had (the documented outcome past the limit), and the
+  // name is marked, so ENSv1 cannot write below it again.
+  setMaxLegacyRowsVoidedForTesting(2);
+  register(ETH_REGISTRY, "y");
+  assert.assertNotNull(Domain.load(underY)!.resolver);
+  assert.fieldEquals(
+    "ENSv2NamePath",
+    child(eth, "y").toHexString(),
+    "legacySubtreeVoided",
+    "true"
+  );
 });
 
 // ---------------------------------------------------------------------------
