@@ -3,6 +3,146 @@
 Version labels match the Subgraph Studio deployments of the mainnet subgraph
 `5XqPmWe6gjyrJtFn9cLy237i4cWw2j9HcUJEXsP5qGtH`.
 
+## v2.3.5 (2026-11-17)
+
+Not deployed yet.
+
+### Fixed
+
+- One link could make a handler write an unbounded number of paths. A name's
+  subregistry can be any address, so a registry can be linked under its own
+  names or along a chain of registries, and every namespace a registry was
+  projected under cost one path per name: 20 registrations across four
+  registries gave 780 paths, and a registry with three names pointing back at
+  it about 64 million. A registry's names are now projected under its
+  canonical namespace (the name it declares with `setParent`, reached through
+  that parent's canonical name) and at most 8 other namespaces, 16 in all,
+  and one event backfills at most 10,000 names (the rest follows over later
+  events, see below). A namespace that is refused stays active with
+  `materialized: false`; emitting the link again retries it. The canonical namespace does not compete with aliases, so pointing
+  other names at a registry cannot keep its own names out. Adds
+  `ENSv2Registry.materializedNamespaces`, `ENSv2Namespace.materialized` and
+  `ENSv2Namespace.canonical`. 1,754 of the registries on mainnet declare a
+  parent, and in the 23 sampled the declaration preceded the link in 22.
+- Nothing limited how many names could sit below one name, and removing a
+  link, an unregistration or a re-registration retires all of them in the
+  handler of that one event. A handler cannot release memory, and retiring a
+  name took about 25 KB of the 4 GiB it has (measured in matchstick), so
+  beyond roughly 160,000 names the handler could never complete and the
+  subgraph would stop for good. It did not take a large registry to get
+  there: a name pointed at the ETHRegistry collected every later `.eth`
+  registration and migration under it, for one transaction. The names below
+  every name are now counted, at every depth (new entity `ENSv2SubtreeSize`,
+  per path and per slot), and a name that would take a name above it past
+  100,000 is not projected: it has its `ENSv2NameSlot` and no `ENSv2NamePath`
+  or `Domain`. Names directly under the RootRegistry are exempt. The retire
+  loop now loads three entities per name instead of seven and writes the
+  parent's `subdomainCount` once per run of siblings, which brings a name
+  down to about 11 KB, so a full 100,000 stays near 1 GiB.
+- A registry with more than 10,000 names when it was linked was never
+  projected: the link was refused as a whole, and emitting it again met the
+  same limit. That is the case of a large subname issuer that registers its
+  names in a new registry and then points its name at it. Such a registry is
+  now admitted and projected 10,000 names per event: what one event does not
+  reach is queued (new entities `ENSv2BackfillQueue` and
+  `ENSv2BackfillTask`) and taken up by the registry events that follow, in
+  any registry, or by emitting the link again. Adds
+  `ENSv2Namespace.backfilled`, `backfillCursor` and `backfillQueued`, and
+  `ENSv2NameSlot.registryIndex`. While a namespace is not finished, the
+  ENSv1 rows below its parent name are cleared as for a refused link.
+- Removing a link and making it again repeated the projection of every
+  registry below it, up to the backfill limit, for two events. A registry's
+  names are now projected at most 32 times under its canonical namespace and
+  32 times under aliases over its whole life, re-links higher up included;
+  after that a link of that kind is recorded but not projected. Adds
+  `ENSv2Registry.canonicalMaterializations` and `aliasMaterializations`.
+- A record update on a PermissionedResolver refreshed every name linked to
+  the record, and rebuilt the record's snapshot for each one. The source has
+  no address filter, so any contract could emit `Linked` N times and an
+  update M times for N x M work. One event now refreshes the first 100 names
+  linked to the record (and, for a default record, the first 100 names
+  pointed at the resolver), and builds the snapshot once. A name beyond that
+  is never given a snapshot from the record, so its legacy `Resolver` and
+  `Domain.resolvedAddress` are empty, never out of date; the resolver is
+  flagged with `ENSv2Resolver.legacyProjectionTruncated`. Adds
+  `ENSv2ResolverAttachment.index`. This replaces the earlier decision to
+  have no cap.
+- Names more than 16 registries below a link that was removed stayed live,
+  with their resolver and address. Retiring names now has no depth limit
+  (it works through a list instead of recursing); only projection is limited
+  to 16 registries per event.
+- ENSv1 subnames of a name registered in ENSv2 kept their ENSv1 resolver and
+  address. ENSv2 resolves a name through its registries, so once the parent
+  is registered in ENSv2 (migrated, or registered again after it lapsed), an
+  ENSv1 subname that was not created again in ENSv2 is answered by the
+  parent's ENSv2 resolver or does not resolve at all. On mainnet 163 such
+  subnames under 24 migrated names showed an address the Universal Resolver
+  no longer returns (157 return the zero address, 6 revert). When a name is
+  projected, every ENSv1 `Domain` row below it, at any depth, now loses its
+  resolver and resolved address, and ENSv1 `NewResolver` events for those
+  names are history-only from then on. Adds
+  `ENSv2NamePath.legacySubtreeVoided`. A locked NameWrapper name that
+  migrated into a WrapperRegistry keeps its emancipated subnames that have
+  not migrated, which still resolve through ENSv1, until they migrate, leave
+  the NameWrapper (new entity `ENSv2LegacyCutoff`) or the name stops
+  pointing at a WrapperRegistry.
+- A link that is refused by one of the limits above left the ENSv1 `Domain`
+  rows of the names behind it showing their ENSv1 resolver and address.
+  Every ENSv1 row below the linked name is now cleared, with the same mark.
+  For a registered name the fix above has already done this; it matters for
+  names under the RootRegistry and for locked migrations.
+- A registration that a WrapperRegistry makes in itself (an emancipated
+  subname migrating into its parent's registry) was not recorded as a
+  migration. `ENSv2NameSlot.migratedFromV1` and
+  `ENSv2LabelRegistered.isV1Migration` are now true for it.
+- Retiring a name scanned every namespace the name had ever had below it, so
+  pointing a name at many addresses and then unregistering and registering
+  it repeatedly multiplied the work. A name has one subregistry at a time:
+  the namespace linked now is kept in `ENSv2NamePath.activeNamespace` and is
+  the only one followed. Linking a namespace retires any other still active
+  under the same name, and a `SubregistryUpdated` no longer links under a
+  path that another registry's slot has taken over.
+- A name pointed at a resolver before the resolver had any link was not
+  remembered, so a default record it was later given through an unlink
+  (`Linked` to record 0) was never refreshed. It is now remembered at that
+  point.
+- Registering a name again left the previous holder's subnames live.
+  `_register()` overwrites the entry's subregistry and emits
+  `SubregistryUpdated` only for a non-zero value, so the names of the old
+  subregistry stayed active, and a later link did not retire them either.
+  `LabelRegistered` now retires them and deactivates the old link.
+- A registry that was not deployed through VerifiableFactory got an
+  `ENSv2Registry` row when a name pointed at it, but no data source, so none
+  of its names were indexed. A registry now also gets its data source from
+  its own first `LabelRegistered`, `LabelReserved` or `ParentUpdated`,
+  through the new addressless `ENSv2RegistryDiscovery` data source. Being
+  named by another registry does not start one, since any address can be
+  named. Adds `ENSv2Registry.indexed`.
+- `Registration.cost` read 0 for every name renewed since the ENSv2 launch.
+  ETHRenewerV1, which renews the names still reserved for migration, takes
+  its payment in an ERC-20 token and then calls
+  `WrappedEthRegistrarController.renew(label, 0)` to sync the NameWrapper;
+  the controller emits `NameRenewed` with cost 0, and anyone can trigger the
+  same for any name through `syncWrapper`. A renewal with cost 0 no longer
+  overwrites the cost. A native ENSv2 registration over a lapsed ENSv1
+  registration now clears the cost instead of keeping the old one.
+- `Domain.subdomainCount` drifted, below zero for some names. The original
+  mapping, kept until now, took a child off its parent on every save of a
+  row in the deleted state (no owner, no resolver, no children), so a second
+  event for an already deleted subname (another `NewOwner` to the zero
+  address, a `Transfer`, a `NewResolver`) cost the parent a second child, and
+  it counted a subname only at its first `NewOwner`, so one that was deleted
+  and created again was never counted again. The count now changes only when
+  a name becomes live or stops being so, in both directions, and the change
+  carries upward when the parent crosses the same line. The ENSv1 handlers,
+  the ENSv2 projection and retirement, and the sweeps that take a resolver
+  off ENSv1 rows all go through the same two functions
+  (`src/subdomainCount.ts`). One consequence on the ENSv2 side: a retired
+  name that still has live rows below it keeps counting in its parent until
+  they are gone, as a deleted ENSv1 name always has.
+
+Requires a full re-index.
+
 ## v2.3.4 (2026-11-17)
 
 Supersedes v2.3.3, which was tagged but not deployed.

@@ -18,7 +18,6 @@ import {
 import {
   appendRegistrySlotIndex,
   nameSlotId,
-  namespaceLinkId,
   resourceId,
   slotPathIndexId,
   toSlotId,
@@ -37,13 +36,13 @@ import {
   isMigrationController,
 } from "./ensv2Constants";
 import {
-  adjustParentSubdomainCount,
   retireProjectedDomain,
   syncProjectedExpiry,
   syncProjectedHolder,
   syncProjectedToken,
 } from "./ensv2Domain";
 import { processEACRolesChanged } from "./ensv2Roles";
+import { addToSubdomainCount } from "./subdomainCount";
 import { syncRegistrationFromSlot } from "./ensv2Registrar";
 import { processApprovalForAll } from "./accessControl";
 import {
@@ -51,8 +50,11 @@ import {
   handleResolverUpdated as handleResolverUpdatedPaths,
   handleSubregistryUpdated as handleSubregistryUpdatedPaths,
   clearProjectedDomainResolversForSlot,
+  continueQueuedBackfills,
   deactivateDescendantsOfPath,
+  resetBackfillBudget,
   materializePathsForSlot,
+  unlinkSubregistryFromSlot,
 } from "./ensv2Paths";
 import {
   Domain,
@@ -61,7 +63,6 @@ import {
   ENSv2LabelUnregistered,
   ENSv2NamePath,
   ENSv2NameSlot,
-  ENSv2NamespaceLink,
   ENSv2Registry,
   ENSv2Resource,
   ENSv2SlotPathIndex,
@@ -139,6 +140,7 @@ function deactivateSlotIncarnation(
 }
 
 export function handleLabelRegistered(event: LabelRegistered): void {
+  resetBackfillBudget();
   bootstrapRegistry(event.address, event.block);
 
   let registryId = event.address;
@@ -169,7 +171,14 @@ export function handleLabelRegistered(event: LabelRegistered): void {
     slot.label = event.params.label;
   }
   let account = createOrLoadAccount(event.params.owner);
+  // A migration: the sender is a migration controller, or a WrapperRegistry
+  // registering in itself, which only its own NameWrapper receiver does
+  // (LockedWrapperReceiver._inject, for an emancipated subname sent to it).
   let isV1Migration = isMigrationController(event.params.sender);
+  if (!isV1Migration && event.params.sender.equals(event.address)) {
+    let ownRegistry = ENSv2Registry.load(registryId);
+    isV1Migration = ownRegistry != null && ownRegistry.kind == "WRAPPER";
+  }
   slot.owner = account.id;
   slot.registrant = account.id;
   slot.status = "REGISTERED";
@@ -184,18 +193,30 @@ export function handleLabelRegistered(event: LabelRegistered): void {
   // handleResolverUpdated/
   // handleSubregistryUpdated will overwrite these again later in the same
   // transaction if the registration call did set them.
+  let previousSubregistry = slot.subregistry;
   slot.resolver = null;
   slot.resolverAddress = null;
   slot.subregistry = null;
   slot.subregistryAddress = null;
   slot.updatedAt = event.block.timestamp;
   slot.updatedAtBlock = event.block.number;
-  slot.save();
   if (isNewSlot) {
     appendRegistrySlotIndex(slot);
   }
+  slot.save();
 
   clearProjectedDomainResolversForSlot(slot);
+
+  // The subregistry the slot pointed at before this registration is gone on
+  // chain (see above), and with it every name that hung off this one through
+  // it: the previous holder's subnames, when a lapsed name is registered
+  // again. No SubregistryUpdated announces it, and a later one would find
+  // slot.subregistry already null, so retire them here. If this registration
+  // sets the same subregistry again, the SubregistryUpdated that follows
+  // links and backfills it afresh.
+  if (previousSubregistry) {
+    unlinkSubregistryFromSlot(slot, previousSubregistry, event.block);
+  }
 
   let history = new ENSv2LabelRegistered(createEventID(event));
   history.slot = slot.id;
@@ -224,6 +245,8 @@ export function handleLabelRegistered(event: LabelRegistered): void {
   // The other bounded loop: materialise a path for
   // each namespace this registry currently, actively serves.
   materializePathsForSlot(registry, slot, event, isV1Migration);
+
+  continueQueuedBackfills(event);
 }
 
 export function handleLabelReserved(event: LabelReserved): void {
@@ -254,10 +277,10 @@ export function handleLabelReserved(event: LabelReserved): void {
   slot.expiryDate = event.params.expiry;
   slot.updatedAt = event.block.timestamp;
   slot.updatedAtBlock = event.block.number;
-  slot.save();
   if (isNewSlot) {
     appendRegistrySlotIndex(slot);
   }
+  slot.save();
   // LabelReserved is represented as current slot state only.
 }
 
@@ -304,22 +327,21 @@ export function handleLabelUnregistered(event: LabelUnregistered): void {
     if (path == null || !path.slot.equals(slot.id)) {
       continue;
     }
-    // Mirror ENSv1: a child stops counting towards its parent's
-    // subdomainCount when it is no longer live. Transition-guarded so a
-    // repeated unregister cannot double-decrement.
     let wasActive = path.active;
-    if (wasActive) {
-      adjustParentSubdomainCount(path, -1);
-    }
     path.active = false;
     path.updatedAt = event.block.timestamp;
     path.updatedAtBlock = event.block.number;
     path.save();
     if (wasActive) {
-      retireProjectedDomain(path, slot, event.block.timestamp);
+      // Mirror ENSv1: a child stops counting towards its parent's
+      // subdomainCount when it is no longer live (subdomainCount.ts).
+      let parentDomainId = retireProjectedDomain(path, event.block.timestamp);
+      if (parentDomainId) {
+        addToSubdomainCount(parentDomainId!, -1);
+      }
       // getSubregistry() returns zero for an unregistered (expired) name on
       // every implementation, so nothing below it resolves any more.
-      deactivateDescendantsOfPath(path, event.block, 0);
+      deactivateDescendantsOfPath(path, event.block);
     }
   }
 
@@ -338,13 +360,7 @@ export function handleLabelUnregistered(event: LabelUnregistered): void {
     slot.subregistryAddress = null;
     slot.save();
     if (previousSubregistry) {
-      let link = ENSv2NamespaceLink.load(
-        namespaceLinkId(registryId, slot.slotId, previousSubregistry)
-      );
-      if (link != null) {
-        link.active = false;
-        link.save();
-      }
+      unlinkSubregistryFromSlot(slot, previousSubregistry, event.block);
     }
   }
 
@@ -358,6 +374,10 @@ export function handleLabelUnregistered(event: LabelUnregistered): void {
 }
 
 export function handleExpiryUpdated(event: ExpiryUpdated): void {
+  // Renewals are the most frequent registry event: they carry unfinished
+  // backfills forward too.
+  resetBackfillBudget();
+  continueQueuedBackfills(event);
   bootstrapRegistry(event.address, event.block);
 
   let registryId = event.address;
@@ -406,11 +426,14 @@ export function handleExpiryUpdated(event: ExpiryUpdated): void {
 export function handleSubregistryUpdated(event: SubregistryUpdated): void {
   bootstrapRegistry(event.address, event.block);
   handleSubregistryUpdatedPaths(event);
+  continueQueuedBackfills(event);
 }
 
 export function handleResolverUpdated(event: ResolverUpdated): void {
+  resetBackfillBudget();
   bootstrapRegistry(event.address, event.block);
   handleResolverUpdatedPaths(event);
+  continueQueuedBackfills(event);
 }
 
 export function handleTokenResource(event: TokenResource): void {

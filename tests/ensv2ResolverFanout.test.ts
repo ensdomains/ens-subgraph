@@ -12,6 +12,7 @@ import {
   handleLinked,
   handleTextUpdated,
 } from "../src/ensv2Resolver";
+import { MAX_LEGACY_FANOUT } from "../src/ensv2ResolverProjection";
 import { createResolverID } from "../src/resolver";
 import {
   AddressUpdated,
@@ -179,12 +180,29 @@ function runFanout(size: i32): void {
   handleAddressUpdated(addressEvent(Bytes.fromHexString(OWNER)));
   handleTextUpdated(textEvent());
 
+  // The native side is complete whatever the size.
   assert.entityCount("ENSv2ResolverRecordLinkMembership", size);
   assert.entityCount("Resolver", size);
+  // One event refreshes the first MAX_LEGACY_FANOUT linked names. The rest
+  // keep the snapshot from their own Linked event, taken before the record
+  // had anything in it, and the resolver says so.
+  assert.fieldEquals(
+    "ENSv2Resolver",
+    RESOLVER_ADDRESS,
+    "legacyProjectionTruncated",
+    size > MAX_LEGACY_FANOUT ? "true" : "false"
+  );
   for (let i = 0; i < resolverIds.length; i++) {
     let resolver = Resolver.load(resolverIds[i]);
     if (resolver == null) {
       assert.assertTrue(false);
+      continue;
+    }
+    if (i >= MAX_LEGACY_FANOUT) {
+      assert.assertTrue(resolver.contentHash === null);
+      assert.assertTrue(resolver.addr === null);
+      assert.assertTrue(resolver.texts === null);
+      assert.assertTrue(resolver.coinTypes === null);
       continue;
     }
     let contentHash = resolver.contentHash;
@@ -242,4 +260,51 @@ test("fanout benchmark: 500 active explicit memberships", () => {
 
 test("fanout benchmark: 1000 active explicit memberships", () => {
   runFanout(1000);
+});
+
+// A name linked beyond the limit must not be handed the record as it is at
+// that moment: no later update would reach it, and it would go on showing an
+// address the record no longer has.
+test("a name linked to a populated record beyond the limit gets no snapshot, before or after an update", () => {
+  let owner = new Account(OWNER);
+  owner.save();
+  handleAddressUpdated(addressEvent(Bytes.fromHexString(OWNER)));
+  let resolverIds = new Array<string>();
+  for (let i = 0; i < MAX_LEGACY_FANOUT + 1; i++) {
+    let node = Bytes.fromI32(i + 1);
+    resolverIds.push(seedDomain(node, owner));
+    handleLinked(linkedEvent(node));
+  }
+  let lastNode = Bytes.fromI32(MAX_LEGACY_FANOUT + 1).toHexString();
+  let lastTracked = Bytes.fromI32(MAX_LEGACY_FANOUT).toHexString();
+  assert.fieldEquals("Domain", lastTracked, "resolvedAddress", OWNER);
+  assert.fieldEquals("Domain", lastNode, "resolvedAddress", "null");
+  assert.fieldEquals("Resolver", resolverIds[MAX_LEGACY_FANOUT], "addr", "null");
+  assert.fieldEquals("ENSv2Resolver", RESOLVER_ADDRESS, "legacyProjectionTruncated", "true");
+
+  const OTHER = "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+  handleAddressUpdated(addressEvent(Bytes.fromHexString(OTHER)));
+  assert.fieldEquals("Domain", lastTracked, "resolvedAddress", OTHER);
+  assert.fieldEquals("Domain", lastNode, "resolvedAddress", "null");
+  // The native record is complete either way.
+  assert.entityCount("ENSv2ResolverRecordLinkMembership", MAX_LEGACY_FANOUT + 1);
+});
+
+// The PermissionedResolver source has no address filter, so these events can
+// come from any contract, for nodes that are no names at all.
+test("links to nodes without a Domain cost no legacy writes and stop at the limit", () => {
+  for (let i = 0; i < MAX_LEGACY_FANOUT + 50; i++) {
+    handleLinked(linkedEvent(Bytes.fromI32(i + 1)));
+  }
+  assert.fieldEquals("ENSv2Resolver", RESOLVER_ADDRESS, "legacyProjectionTruncated", "false");
+
+  handleAddressUpdated(addressEvent(Bytes.fromHexString(OWNER)));
+
+  assert.entityCount("ENSv2ResolverRecordLinkMembership", MAX_LEGACY_FANOUT + 50);
+  assert.entityCount("Resolver", 0);
+  assert.entityCount("Domain", 0);
+  // No name was eligible, so the record's snapshot was never built: the
+  // address would otherwise have created its Account.
+  assert.notInStore("Account", OWNER);
+  assert.fieldEquals("ENSv2Resolver", RESOLVER_ADDRESS, "legacyProjectionTruncated", "true");
 });
