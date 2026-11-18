@@ -117,7 +117,7 @@ function addressEvent(value: Bytes, coinType: i32 = 60): AddressUpdated {
   return event;
 }
 
-function textEvent(): TextUpdated {
+function textEvent(key: string = "benchmark", keyHash: i32 = 77): TextUpdated {
   let mock = newMockEvent();
   let event = new TextUpdated(
     Address.fromString(RESOLVER_ADDRESS),
@@ -139,11 +139,11 @@ function textEvent(): TextUpdated {
   event.parameters.push(
     new ethereum.EventParam(
       "keyHash",
-      ethereum.Value.fromFixedBytes(Bytes.fromI32(77))
+      ethereum.Value.fromFixedBytes(Bytes.fromI32(keyHash))
     )
   );
   event.parameters.push(
-    new ethereum.EventParam("key", ethereum.Value.fromString("benchmark"))
+    new ethereum.EventParam("key", ethereum.Value.fromString(key))
   );
   event.parameters.push(
     new ethereum.EventParam("value", ethereum.Value.fromString("complete"))
@@ -341,4 +341,26 @@ test("a record with more coin types than its snapshot lists still resolves to it
   const OTHER = "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
   handleAddressUpdated(addressEvent(Bytes.fromHexString(OTHER)));
   assert.fieldEquals("Domain", node.toHexString(), "resolvedAddress", OTHER);
+});
+
+// A text key has no length limit on chain, and the snapshot's key list is
+// copied onto the legacy Resolver row of every name that follows the record.
+test("a text key too long for the snapshot is left out of it", () => {
+  let owner = new Account(OWNER);
+  owner.save();
+  let node = Bytes.fromI32(1);
+  let resolverId = seedDomain(node, owner);
+  handleLinked(linkedEvent(node));
+
+  handleTextUpdated(textEvent("avatar", 1));
+  handleTextUpdated(textEvent("k".repeat(300), 2));
+  handleTextUpdated(textEvent("url", 3));
+
+  let texts = Resolver.load(resolverId)!.texts!;
+  assert.i32Equals(2, texts.length);
+  assert.assertTrue(texts.includes("avatar"));
+  assert.assertTrue(texts.includes("url"));
+  assert.fieldEquals("ENSv2Resolver", RESOLVER_ADDRESS, "legacyProjectionTruncated", "true");
+  // The native record has all three.
+  assert.entityCount("ENSv2ResolverText", 3);
 });

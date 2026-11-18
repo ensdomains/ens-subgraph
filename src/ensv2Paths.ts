@@ -929,6 +929,11 @@ function drainDeactivation(pending: Array<Bytes>, block: ethereum.Block): i32 {
       }
     }
   }
+  // A large retirement and a large backfill do not share one handler: what
+  // was retired is taken off the event's backfill budget (a unit retired is
+  // about an eighth of a name backfilled), and a backfill that no longer
+  // fits waits in the queue for the next event.
+  backfillSlotBudget -= retired / 8;
   return retired;
 }
 
@@ -1427,6 +1432,9 @@ function backfillSlot(
     voidLegacyBelowNamespace(namespace, event.block.timestamp);
     return true;
   }
+  if (isHeldByAnotherSlot(existing, slot)) {
+    return true;
+  }
   let path = materializePathInNamespace(
     registry,
     namespace,
@@ -1492,12 +1500,17 @@ export function materializePathsForSlot(
       continue;
     }
     let chain = ancestorsFrom(namespace.parentPath);
-    let pathId = pathNamehash(namespace.baseNamehash, slot.labelhash);
-    if (ENSv2NamePath.load(pathId) == null && !fitsNameLimits(chain, slot)) {
+    let existing = ENSv2NamePath.load(
+      pathNamehash(namespace.baseNamehash, slot.labelhash)
+    );
+    if (existing == null && !fitsNameLimits(chain, slot)) {
       // Too long or too deep: never projected, so nothing for a later
       // backfill to pick up. The ENSv1 row it may have had is cleared with
       // the rest below the parent name.
       voidLegacyBelowNamespace(namespace, event.block.timestamp);
+      continue;
+    }
+    if (isHeldByAnotherSlot(existing, slot)) {
       continue;
     }
     let path = materializePathInNamespace(
@@ -1525,6 +1538,21 @@ export function materializePathsForSlot(
   }
 }
 
+// A live name belongs to the slot that has it. A path changes hands when a
+// name switches to another subregistry, and by then the old registry's
+// namespace has been retired and its paths with it, so a slot that claims a
+// path which is still active under another slot is a second token carrying
+// the same labelhash, which only a contract that emits whatever it likes can
+// produce. It is left without the name: taking the path would bring
+// everything counted below it onto a slot that never passed the limit for
+// it.
+function isHeldByAnotherSlot(
+  path: ENSv2NamePath | null,
+  slot: ENSv2NameSlot
+): boolean {
+  return path != null && path.active && !path.slot.equals(slot.id);
+}
+
 // Materialises (or rebinds and reactivates) the slot's path under one
 // namespace and projects it. Returns null, and writes nothing, when the path
 // would become active under a name that already has maxNamesBelowName units
@@ -1544,6 +1572,9 @@ function materializePathInNamespace(
   if (path == null && !fitsNameLimits(chain, slot)) {
     return null;
   }
+  if (isHeldByAnotherSlot(path, slot)) {
+    return null;
+  }
   if (path == null || !path.active) {
     if (!reserveBelowAncestors(chain, 1)) {
       return null;
@@ -1560,8 +1591,9 @@ function materializePathInNamespace(
     // Rebind it, or the new slot's transfers, renewals and unregistration
     // never reach the projected Domain.
     if (!path.slot.equals(slot.id)) {
-      // Whatever is still counted below the path moves with it. Normally
-      // nothing: the old registry's namespace was retired first.
+      // Whatever is still counted below the path moves with it. Nothing, as
+      // a rule: the path is inactive (isHeldByAnotherSlot), so what was
+      // below it was retired.
       let below = ENSv2SubtreeSize.load(path.id);
       if (below != null && below.paths > 0) {
         addToSubtreeSize(path.slot, -below.paths);

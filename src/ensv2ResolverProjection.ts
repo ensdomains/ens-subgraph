@@ -60,6 +60,11 @@ export const MAX_LEGACY_FANOUT = 100;
 // (ENSv2Resolver.legacyProjectionTruncated).
 export const MAX_LEGACY_SNAPSHOT_KEYS = 1000;
 
+// A text key longer than this is left out of the snapshot's list, and the
+// resolver flagged: the list is copied onto the legacy Resolver row of every
+// name that follows the record, and a key has no length limit on chain.
+export const MAX_LEGACY_TEXT_KEY_LENGTH = 255;
+
 let maxLegacySnapshotKeys: i32 = MAX_LEGACY_SNAPSHOT_KEYS;
 
 // Tests only: reaching the real limit means rebuilding a thousand-entry
@@ -612,9 +617,6 @@ function buildLegacyRecordSnapshot(
     textCount = maxLegacySnapshotKeys;
     truncated = true;
   }
-  if (truncated) {
-    flagLegacyProjectionTruncated(record.resolver);
-  }
   for (let i = 0; i < textCount; i++) {
     let index = ENSv2ResolverTextIndex.load(
       resolverTextIndexId(record.id, i),
@@ -624,8 +626,15 @@ function buildLegacyRecordSnapshot(
     }
     let text = ENSv2ResolverText.load(index.text);
     if (text != null) {
-      texts.push(text.key);
+      if (text.key.length > MAX_LEGACY_TEXT_KEY_LENGTH) {
+        truncated = true;
+      } else {
+        texts.push(text.key);
+      }
     }
+  }
+  if (truncated) {
+    flagLegacyProjectionTruncated(record.resolver);
   }
   if (texts.length > 0) {
     snapshot.texts = texts;

@@ -7,19 +7,32 @@
 // in a handler that cannot complete, which stops the subgraph. So the names
 // below every name are counted, per path and per slot, and a name that would
 // take a slot above it past the limit is not projected.
-import { Address, BigInt, ByteArray, Bytes, crypto, log } from "@graphprotocol/graph-ts";
+import {
+  Address,
+  BigInt,
+  ByteArray,
+  Bytes,
+  crypto,
+  ethereum,
+  log,
+} from "@graphprotocol/graph-ts";
 import {
   afterEach,
   assert,
   clearStore,
   dataSourceMock,
+  newMockEvent,
   test,
 } from "matchstick-as/assembly/index";
 import {
   handleLabelRegistered,
   handleLabelUnregistered,
   handleSubregistryUpdated,
+  handleTokenResource,
+  handleTransferBatch,
+  handleTransferSingle,
 } from "../src/ensv2Registry";
+import { TransferBatch } from "../src/types/RootRegistry/PermissionedRegistry";
 import {
   MAX_BACKFILL_SLOTS_PER_EVENT,
   MAX_NAMES_BELOW_NAME,
@@ -46,6 +59,8 @@ import {
   createLabelRegisteredEvent,
   createLabelUnregisteredEvent,
   createSubregistryUpdatedEvent,
+  createTokenResourceEvent,
+  createTransferSingleEvent,
 } from "./ensv2TestEvents";
 
 const ROOT_REGISTRY = "0xB458D6a3a77919449d03e7A6903C26827c1eC43f";
@@ -503,9 +518,10 @@ test("a backfill deep in the tree projects fewer names per event", () => {
 });
 
 // A contract that only emits the events can register one labelhash under
-// two token ids. The two slots then take the one path from each other with
-// every event.
-test("two slots that hand one name back and forth do not lengthen each other's list", () => {
+// two token ids. A live name stays with the slot that has it: handing it to
+// the second would bring everything below it onto a slot that never passed
+// the limit for it, and with every event the two would trade it again.
+test("a second slot with the same labelhash does not take a live name", () => {
   let eth = setUpEth();
   register(ETH_REGISTRY, "x");
   let x = child(eth, "x");
@@ -518,17 +534,137 @@ test("two slots that hand one name back and forth do not lengthen each other's l
       createLabelRegisteredEvent(R1, tokenOf("b"), lh("a"), "a", OWNER)
     );
   }
-  assert.i32Equals(0, pathCountOf(R1, "a"));
-  assert.i32Equals(1, pathCountOf(R1, "b"));
-  assert.fieldEquals("ENSv2NamePath", child(x, "a").toHexString(), "slotIndex", "0");
+  assert.i32Equals(1, pathCountOf(R1, "a"));
+  assert.i32Equals(0, pathCountOf(R1, "b"));
   assert.fieldEquals(
     "ENSv2NamePath",
     child(x, "a").toHexString(),
     "slot",
-    slotId(R1, "b").toHexString()
+    slotId(R1, "a").toHexString()
   );
   assert.fieldEquals("ENSv2Namespace", ns(R1, x), "pathCount", "1");
   assert.i32Equals(NAMESPACE_UNITS + 1, below(x));
+
+  // Once the first slot's name is retired, the other may have it, and the
+  // path moves from one slot's list to the other's.
+  unregister(R1, "a");
+  handleLabelRegistered(
+    createLabelRegisteredEvent(R1, tokenOf("b"), lh("a"), "a", OWNER)
+  );
+  assert.i32Equals(0, pathCountOf(R1, "a"));
+  assert.i32Equals(1, pathCountOf(R1, "b"));
+  assert.fieldEquals("ENSv2NamePath", child(x, "a").toHexString(), "slotIndex", "0");
+  assert.fieldEquals("ENSv2NamePath", child(x, "a").toHexString(), "active", "true");
+  assert.i32Equals(NAMESPACE_UNITS + 1, below(x));
+});
+
+// A registry derives a token id from the label, so a slot has one labelhash
+// for life. Every other labelhash an emitter gave a slot would be another
+// path on it, and each handler for the slot walks them all.
+test("a slot keeps the labelhash it was created with", () => {
+  let eth = setUpEth();
+  register(ETH_REGISTRY, "x");
+  let x = child(eth, "x");
+  link(ETH_REGISTRY, "x", R1);
+  register(R1, "a");
+  let labels = ["p", "q", "r", "s"];
+  for (let i = 0; i < labels.length; i++) {
+    handleLabelRegistered(
+      createLabelRegisteredEvent(R1, tokenOf("a"), lh(labels[i]), labels[i], OWNER)
+    );
+    unregister(R1, "a");
+    register(R1, "a");
+  }
+  assert.i32Equals(1, pathCountOf(R1, "a"));
+  assert.fieldEquals(
+    "ENSv2NameSlot",
+    slotId(R1, "a").toHexString(),
+    "labelhash",
+    lh("a").toHexString()
+  );
+  assert.notInStore("ENSv2NamePath", child(x, "p").toHexString());
+  assert.notInStore("Domain", child(x, "s").toHexString());
+  assert.fieldEquals("Domain", child(x, "a").toHexString(), "name", "a.x.eth");
+});
+
+// ---------------------------------------------------------------------------
+// Transfers that move nothing
+// ---------------------------------------------------------------------------
+
+const OTHER = "0xF0205A3A3b2A69De6Dbf7f01ED13B2108B2c4321";
+
+function transferSingle(registry: string, label: string, to: string, value: i32): void {
+  let event = createTransferSingleEvent(registry, tokenOf(label), OWNER, to);
+  event.parameters[4] = new ethereum.EventParam(
+    "value",
+    ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(value))
+  );
+  handleTransferSingle(event);
+}
+
+function transferBatch(registry: string, labels: Array<string>, values: Array<i32>, to: string): void {
+  let mockEvent = newMockEvent();
+  let event = new TransferBatch(
+    Address.fromString(registry),
+    mockEvent.logIndex,
+    mockEvent.transactionLogIndex,
+    mockEvent.logType,
+    mockEvent.block,
+    mockEvent.transaction,
+    mockEvent.parameters,
+    mockEvent.receipt
+  );
+  let ids = new Array<BigInt>();
+  let amounts = new Array<BigInt>();
+  for (let i = 0; i < labels.length; i++) {
+    ids.push(tokenOf(labels[i]));
+    amounts.push(BigInt.fromI32(values[i]));
+  }
+  event.parameters = new Array();
+  event.parameters.push(
+    new ethereum.EventParam("operator", ethereum.Value.fromAddress(Address.fromString(OWNER)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("from", ethereum.Value.fromAddress(Address.fromString(OWNER)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("to", ethereum.Value.fromAddress(Address.fromString(to)))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("ids", ethereum.Value.fromUnsignedBigIntArray(ids))
+  );
+  event.parameters.push(
+    new ethereum.EventParam("values", ethereum.Value.fromUnsignedBigIntArray(amounts))
+  );
+  handleTransferBatch(event);
+}
+
+// ERC1155Singleton._update changes the owner only when value > 0 and emits
+// the event either way, so a holder can have the registry emit a "transfer"
+// of their own name to any address.
+test("a transfer of value 0 does not change the owner", () => {
+  let eth = setUpEth();
+  let labels = ["x", "y", "z"];
+  for (let i = 0; i < labels.length; i++) {
+    register(ETH_REGISTRY, labels[i]);
+    handleTokenResource(
+      createTokenResourceEvent(ETH_REGISTRY, tokenOf(labels[i]), BigInt.fromI32(i + 1))
+    );
+  }
+  let x = child(eth, "x").toHexString();
+  let y = child(eth, "y").toHexString();
+  let z = child(eth, "z").toHexString();
+
+  transferSingle(ETH_REGISTRY, "x", OTHER, 0);
+  assert.fieldEquals("Domain", x, "owner", OWNER.toLowerCase());
+  assert.fieldEquals("ENSv2NameSlot", slotId(ETH_REGISTRY, "x").toHexString(), "owner", OWNER.toLowerCase());
+  transferSingle(ETH_REGISTRY, "x", OTHER, 1);
+  assert.fieldEquals("Domain", x, "owner", OTHER.toLowerCase());
+
+  // In a batch: "y" moves, once, and "z" does not.
+  transferBatch(ETH_REGISTRY, ["y", "y", "z"], [1, 1, 0], OTHER);
+  assert.fieldEquals("Domain", y, "owner", OTHER.toLowerCase());
+  assert.fieldEquals("Domain", z, "owner", OWNER.toLowerCase());
 });
 
 // Retiring a namespace walks the list of its paths in one handler. Were the

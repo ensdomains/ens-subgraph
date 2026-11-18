@@ -46,8 +46,12 @@ Not deployed yet.
   long; a path retired on its own gives its position to the last one), and
   each path records its position in `ENSv2NamePath.namespaceIndex`. The
   same goes for `ENSv2SlotPathIndex` and `ENSv2NamePath.slotIndex`: a path
-  that another slot takes over leaves the old slot's list, which two slots
-  handing one path back and forth could otherwise lengthen with every event.
+  that another slot takes over leaves the old slot's list. Two things only
+  a contract that emits whatever it likes can do are refused outright,
+  because each made a slot's list grow with every event: an event that gives
+  an existing slot another labelhash is ignored (a registry derives the
+  token id from the label), and a second slot carrying the same labelhash
+  does not take a name that is live under the first.
   What a name costs to retire also depends on what hangs off it and on how
   long it is, so the count gives a subregistry projected under a name two
   units (a name with a resolver and a subregistry costs 32 to 50 KB), and a
@@ -71,7 +75,9 @@ Not deployed yet.
   plus one for every 16 levels above it, and a subregistry found on it one
   more for every 8. A full event then stays near 1.5 GiB of handler memory
   at any depth; without that, 10,000 names 128 levels deep took more than
-  4 GiB.
+  4 GiB. What an event retires also comes off its backfill budget, so a name
+  that swaps one large registry for another retires in that event and
+  backfills in the next.
 - Removing a link and making it again repeated the projection of every
   registry below it, up to the backfill limit, for two events. A registry's
   names are now projected at most 32 times under its canonical namespace and
@@ -94,7 +100,8 @@ Not deployed yet.
   snapshot lists at most 1,000 coin types and 1,000 text keys
   (`Resolver.coinTypes`, `Resolver.texts`): a record keeps an index row for
   every one it was ever given, and each update walked them all. The
-  resolved address is read by coin type and does not depend on the list.
+  resolved address is read by coin type and does not depend on the list. A
+  text key longer than 255 characters is left out of the list.
 - Names more than 16 registries below a link that was removed stayed live,
   with their resolver and address. Retiring names now has no depth limit
   (it works through a list instead of recursing); only projection is limited
@@ -175,6 +182,15 @@ Not deployed yet.
   rows all go through the same functions (`src/subdomainCount.ts`). One consequence on the ENSv2 side: a retired
   name that still has live rows below it keeps counting in its parent until
   they are gone, as a deleted ENSv1 name always has.
+- A transfer of value 0 changed the owner shown for a name.
+  `ERC1155Singleton._update` moves a token only when the value is above 0
+  and emits `TransferSingle` or `TransferBatch` either way, so a holder could
+  have a registry emit a transfer of their own name to any address, and
+  `Domain.owner`, `Domain.registrant`, `Registration.registrant` and the
+  native slot and token followed it. Zero-value transfers are now ignored.
+  A `TransferBatch` is followed for at most 1,000 distinct token ids: the
+  log can list far more than a real batch could move, and each id walks the
+  slot's paths.
 
 Requires a full re-index.
 

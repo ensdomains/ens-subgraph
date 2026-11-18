@@ -24,7 +24,7 @@ import {
   toSlotId,
   tokenEntityId,
 } from "./ensv2Utils";
-import { cutOffLegacyHoldout } from "./legacyGovernance";
+import { cutOffLegacyHoldoutWithinEvent } from "./legacyGovernance";
 import {
   checkValidLabel,
   concat,
@@ -143,6 +143,24 @@ function deactivateSlotIncarnation(
   slot.registrant = null;
 }
 
+// A slot is a token id with its version bits cleared, and a registry derives
+// the token id from the label, so a slot has one labelhash for life. An
+// event that gives an existing slot another one can only come from a
+// contract that emits whatever it likes, and is ignored: every labelhash a
+// slot were allowed to take would be another path on it, and the handlers
+// for a slot walk all of its paths.
+function ignoreRelabelledSlot(slot: ENSv2NameSlot, labelHash: Bytes): void {
+  log.warning(
+    "registry {}: slot {} has labelhash {}, ignoring an event that gives it {}",
+    [
+      slot.registry.toHexString(),
+      slot.slotId.toString(),
+      slot.labelhash.toHexString(),
+      labelHash.toHexString(),
+    ]
+  );
+}
+
 export function handleLabelRegistered(event: LabelRegistered): void {
   resetBackfillBudget();
   bootstrapRegistry(event.address, event.block);
@@ -152,6 +170,10 @@ export function handleLabelRegistered(event: LabelRegistered): void {
   let id = nameSlotId(registryId, slotId);
 
   let slot = ENSv2NameSlot.load(id);
+  if (slot != null && !slot.labelhash.equals(event.params.labelHash)) {
+    ignoreRelabelledSlot(slot, event.params.labelHash);
+    return;
+  }
   // Row existence alone isn't "was this previously registered" — a plain
   // reservation (handleLabelReserved) already creates this row before any
   // real registration happens, so a reserved-then-first-registered slot was
@@ -254,6 +276,7 @@ export function handleLabelRegistered(event: LabelRegistered): void {
 }
 
 export function handleLabelReserved(event: LabelReserved): void {
+  resetBackfillBudget();
   bootstrapRegistry(event.address, event.block);
 
   let registryId = event.address;
@@ -261,6 +284,10 @@ export function handleLabelReserved(event: LabelReserved): void {
   let id = nameSlotId(registryId, slotId);
 
   let slot = ENSv2NameSlot.load(id);
+  if (slot != null && !slot.labelhash.equals(event.params.labelHash)) {
+    ignoreRelabelledSlot(slot, event.params.labelHash);
+    return;
+  }
   let isNewSlot = false;
   if (slot == null) {
     slot = new ENSv2NameSlot(id);
@@ -316,7 +343,7 @@ export function handleLabelReserved(event: LabelReserved): void {
       ) {
         continue;
       }
-      cutOffLegacyHoldout(
+      cutOffLegacyHoldoutWithinEvent(
         pathNamehash(namespace.baseNamehash, event.params.labelHash),
         event.block
       );
@@ -734,8 +761,21 @@ function makeTokenTransfer(
   // for this transfer until a later TokenResource resolves the slot.
 }
 
+// Ids one TransferBatch moves. A real batch pays a storage write per token
+// and cannot come near this in one transaction; the log itself can list tens
+// of thousands of ids for the price of its data, and each id walks the
+// slot's paths.
+const MAX_BATCH_TRANSFER_IDS = 1000;
+
+// A transfer of value 0 moves nothing: ERC1155Singleton._update changes the
+// owner only when value > 0 and emits the event either way, so a holder can
+// have a registry emit a "transfer" of their own token to anyone. Following
+// it would show that address as the owner.
 export function handleTransferSingle(event: TransferSingle): void {
   bootstrapRegistry(event.address, event.block);
+  if (event.params.value.isZero()) {
+    return;
+  }
 
   makeTokenTransfer(
     event.address,
@@ -754,7 +794,25 @@ export function handleTransferBatch(event: TransferBatch): void {
 
   let registryId = event.address;
   let ids = event.params.ids;
+  let values = event.params.values;
+  let seen = new Map<string, boolean>();
   for (let i = 0; i < ids.length; i++) {
+    if (i >= values.length || values[i].isZero()) {
+      continue;
+    }
+    // A token changes hands once per batch; a repeated id says nothing new.
+    let key = ids[i].toString();
+    if (seen.has(key)) {
+      continue;
+    }
+    if (seen.size >= MAX_BATCH_TRANSFER_IDS) {
+      log.warning(
+        "registry {}: TransferBatch moves more than {} tokens, the rest are not followed",
+        [registryId.toHexString(), MAX_BATCH_TRANSFER_IDS.toString()]
+      );
+      break;
+    }
+    seen.set(key, true);
     makeTokenTransfer(
       registryId,
       ids[i],

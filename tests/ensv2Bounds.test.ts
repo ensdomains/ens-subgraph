@@ -451,6 +451,38 @@ test("a link removed while its backfill is unfinished is dropped from the queue"
   assert.notInStore("ENSv2NamePath", child(top, "d").toHexString());
 });
 
+// Retiring everything below a name and backfilling a large registry are each
+// sized to fit one handler, not both together: what an event retires comes
+// off its backfill budget.
+test("an event that retires a large subtree leaves the new registry's backfill to the next one", () => {
+  dataSourceMock.setNetwork("sepolia");
+  const OLD = "0xc5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5";
+  const NEW = "0xc6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6";
+  register(ROOT_REGISTRY, "top");
+  let top = child(ROOT_NODE, "top");
+  link(ROOT_REGISTRY, "top", OLD);
+  for (let i = 0; i < 80; i++) {
+    register(OLD, "old" + i.toString());
+  }
+  for (let i = 0; i < 5; i++) {
+    register(NEW, "new" + i.toString());
+  }
+
+  // Eighty names and their registry retired take ten units, all there are.
+  setMaxBackfillSlotsPerEventForTesting(10);
+  link(ROOT_REGISTRY, "top", NEW);
+  assert.fieldEquals("ENSv2NamePath", child(top, "old0").toHexString(), "active", "false");
+  assert.fieldEquals("ENSv2NamePath", child(top, "old79").toHexString(), "active", "false");
+  assert.fieldEquals("ENSv2Namespace", ns(NEW, top), "materialized", "true");
+  assert.fieldEquals("ENSv2Namespace", ns(NEW, top), "backfilled", "false");
+  assert.fieldEquals("ENSv2Namespace", ns(NEW, top), "backfillCursor", "0");
+  assert.notInStore("ENSv2NamePath", child(top, "new0").toHexString());
+
+  register(ROOT_REGISTRY, "elsewhere");
+  assert.fieldEquals("ENSv2Namespace", ns(NEW, top), "backfilled", "true");
+  assert.fieldEquals("Domain", child(top, "new4").toHexString(), "name", "new4.top");
+});
+
 test("the backfill budget is shared by every level below one link", () => {
   dataSourceMock.setNetwork("sepolia");
   const UPPER = "0xc1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1";

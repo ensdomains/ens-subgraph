@@ -401,8 +401,17 @@ export function isLegacyHoldout(domain: Domain, block: ethereum.Block): boolean 
 // left the NameWrapper, or lost its ENSv1 owner). If it did, the name and
 // everything below it lose resolver and address, once and for good.
 export function cutOffLegacyHoldout(node: Bytes, block: ethereum.Block): void {
-  // Called once per event, by handlers that do not sweep otherwise.
+  // The ENSv1 handlers call this once per event and sweep nowhere else.
   resetLegacySweepBudget();
+  cutOffLegacyHoldoutWithinEvent(node, block);
+}
+
+// The same for a handler that has reset the event's budgets itself and may
+// call this more than once.
+export function cutOffLegacyHoldoutWithinEvent(
+  node: Bytes,
+  block: ethereum.Block
+): void {
   let domain = Domain.load(node.toHexString());
   if (domain == null || isLegacyHoldout(domain, block)) {
     return;
